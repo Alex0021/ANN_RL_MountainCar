@@ -1,12 +1,17 @@
-class RandomAgent():
-    def __init__(self):
-        pass
+import numpy as np
+from src.ReplayBuffer import ReplayBuffer
 
-    def observe(self, state, action, next_state, reward):
-        pass
+class RandomAgent():
+    def __init__(self, num_actions:int, obs_dim:int, MAX_STEPS:int=200):
+        self.num_actions = num_actions
+        self.obs_dim = obs_dim * 2 + 2
+        self.replay_buffer = ReplayBuffer(self.obs_dim, MAX_STEPS)
+
+    def observe(self, state, action, next_state, reward, done=False):
+        self.replay_buffer.add(state, action, next_state, reward, done)
 
     def select_action(self, state):
-        pass
+        return np.random.randint(0, self.num_actions)
 
     def update(self):
         pass
