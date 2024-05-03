@@ -1,6 +1,7 @@
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 import time
+import platform
 
 class StatsRecorder:
     def __init__(self, episode_num: int, steps_num: int, bulk_size: int, log_dir: str="logs/train"):
@@ -15,10 +16,21 @@ class StatsRecorder:
         self.total_steps = 0
         dir_name = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
         self.writer = SummaryWriter(log_dir=log_dir+"/"+dir_name, flush_secs=5, max_queue=5)
-        # create and write "launch_tensorboard.sh" file
-        path = log_dir + "/" + dir_name + "/launch_tensorboard.sh"
-        with open(path, "w") as f:
-            str = """
+        # create and write "launch_tensorboard" file
+        if platform.system() == "Windows":
+            file_extension = ".bat"
+            str_code = """
+            @echo off
+            rem # random port
+            set /a "port=(%RANDOM% %% 1000) + 6006"
+            set logdir=./
+            echo Starting tensorboard: %logdir%
+            start http://localhost:%port%
+            tensorboard --logdir=%logdir% --port=%port%
+            """
+        else:
+            file_extension = ".sh"
+            str_code = """
             # random port
             port=$(((RANDOM%1000)+6006))
             logdir="./logs/*"
@@ -26,7 +38,9 @@ class StatsRecorder:
             open http://localhost:$port
             tensorboard --logdir=$logdir --port=$port
             """
-            f.write(str)
+        path = log_dir + "/" + dir_name + "/launch_tensorboard" + file_extension
+        with open(path, "w") as f:
+            f.write(str_code)
 
     def start_recording(self):
         assert self.episode_index < self.episode_num, "Number of episodes exceeded! Maybe call reset"
