@@ -123,7 +123,8 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
         state, _ = env.reset()
         stats.start_recording()
         while not done:
-            action = agent.select_action(state)
+            action = agent.select_action(state, i)
+            stats.record_action(int(action))
             next_state, reward, terminated, truncated, _ = env.step(int(action))
             done  = terminated or truncated
             agent.observe(state, action, next_state, reward, done)
@@ -135,7 +136,8 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
         stats.stop_recording()
 
 def evaluate_agent(path:str, stats:StatsRecorder, MAX_EPISODES:int=1_000_000):
-    env = gym.make('MountainCar-v0', render_mode="human")
+    # env = gym.make('MountainCar-v0', render_mode="human")
+    env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode="human")
     agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
     agent.load(path)
     total_steps = 0
@@ -147,6 +149,7 @@ def evaluate_agent(path:str, stats:StatsRecorder, MAX_EPISODES:int=1_000_000):
         while not done:
             action = agent.select_action(state)
             next_state, reward, terminated, truncated, _ = env.step(int(action))
+            print(f"Reward: {reward}, Action: {action}", end="\r")
             env.render()
             done = terminated or truncated
             state = next_state
@@ -177,7 +180,13 @@ if __name__ == "__main__":
             generate_graphs(stats)
             sys.exit(0)
         elif args[0] == "--train":
-            env = gym.make('MountainCar-v0')
+            # env = gym.make('MountainCar-v0')
+            env = gym.make('gyms:gyms/CustomMountainCar-v0')
+
+            # Training parameters
+            total_episodes = 1_000
+            MAX_EPISODES = total_episodes//10
+
             # agent parameters
             obs_dim = env.observation_space.shape[0]
             num_actions = env.action_space.n
@@ -185,15 +194,14 @@ if __name__ == "__main__":
             MAX_STEPS = 200
             BATCH_SIZE = 64
             gamma = 0.99
-            epsilon = 0.01
-            alpha = 0.01
+            #epsilon = 0.1
+            epsilon = lambda iter: max(0.9*np.exp(-iter/(total_episodes/10)), 0.05)
+            alpha = 0.001
 
-            total_episodes = 1_000_000
-            MAX_EPISODES = total_episodes//10
-            
             stats = StatsRecorder(total_episodes, 
                                 MAX_STEPS, 
                                 BULK_SIZE,
+                                num_actions,
                                 log_dir="logs/train"
                                 )
             
@@ -208,7 +216,7 @@ if __name__ == "__main__":
                             stats=stats
                             )
             
-            #agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
+            # agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
             train_agent(env, agent, stats)
 
             replay_episode(agent.replay_buffer, MAX_EPISODES-1)

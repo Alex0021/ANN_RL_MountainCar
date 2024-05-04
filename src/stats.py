@@ -4,7 +4,7 @@ import time
 import platform
 
 class StatsRecorder:
-    def __init__(self, episode_num: int, steps_num: int, bulk_size: int, log_dir: str="logs/train"):
+    def __init__(self, episode_num: int, steps_num: int, bulk_size: int, action_num:int, log_dir: str="logs/train"):
         assert episode_num % bulk_size == 0, "Bulk size must be a multiple of the number of episodes."
         self.episode_num = episode_num
         self.steps_num = steps_num
@@ -14,8 +14,10 @@ class StatsRecorder:
         self.episode_index = 0
         self.step_index = 0
         self.total_steps = 0
+        self.actions_count = np.zeros(action_num, dtype=np.int32)
         dir_name = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
         self.writer = SummaryWriter(log_dir=log_dir+"/"+dir_name, flush_secs=5, max_queue=5)
+        self.current_epsilon = 0.0
         # create and write "launch_tensorboard" file
         if platform.system() == "Windows":
             file_extension = ".bat"
@@ -51,9 +53,15 @@ class StatsRecorder:
         self.log(**{
             "episodes/episode_length": (self.episode_index, self.step_index + 1),
             "episodes/episode_reward": (self.episode_index, np.sum(self.episode_rewards[self.episode_index])),
+            "episodes/episode_completed": (self.episode_index, self.step_index < self.steps_num - 1),
+            "episodes/episode_actions": (self.episode_index, {"left":self.actions_count[0],
+                                                               "stay":self.actions_count[1],
+                                                               "right":self.actions_count[2]}),
+            "episodes/episode_epsilon": (self.episode_index, self.current_epsilon)
         })
         self.writer.flush()
         self.episode_index += 1
+        self.actions_count = np.zeros_like(self.actions_count)
 
     def reset(self):
         self.episode_rewards = np.zeros((self.episode_num, self.steps_num), dtype=np.float32)
@@ -70,9 +78,23 @@ class StatsRecorder:
             "steps/step_reward": (self.total_steps, reward),
         })
 
+    def record_action(self, action):
+        self.actions_count[action] += 1
+
+    def record_epsilon(self, epsilon):
+        self.current_epsilon = epsilon
+
     def log(self, **kwargs):
         for key, value in kwargs.items():
-            self.writer.add_scalar(key, value[1], value[0])
+            if isinstance(value[1], dict):
+                self.writer.add_scalars(key, value[1], value[0])
+            else:
+                self.writer.add_scalar(key, value[1], value[0])
+        self.writer.flush()
+
+    def log_histogram(self, **kwargs):
+        for key, value in kwargs.items():
+            self.writer.add_histogram(key, value[1], value[0])
         self.writer.flush()
 
     def get_bulk_rewards(self):
