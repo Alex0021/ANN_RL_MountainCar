@@ -116,7 +116,9 @@ def generate_graphs(stats:StatsRecorder, agent_name:str="agent"):
     plt.show()
 
 def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
+    EPISODE_DELAY = 5
     total_steps = 0
+    total_episodes = 0
     for i in tqdm.tqdm(range(stats.episode_num), ncols=75):
         done = False
         np.random.seed(np.random.randint(0, 1000))
@@ -128,20 +130,26 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
             next_state, reward, terminated, truncated, _ = env.step(int(action))
             done  = terminated or truncated
             agent.observe(state, action, next_state, reward, done)
-            if total_steps >= agent.BATCH_SIZE and total_steps % agent.BATCH_SIZE == 0:
+            if total_steps >= agent.BATCH_SIZE:
                 agent.update()
-            state = next_state
             stats.record_reward(reward)
+            state = next_state
             total_steps += 1
+        total_episodes += 1
         stats.stop_recording()
 
-def evaluate_agent(path:str, stats:StatsRecorder, MAX_EPISODES:int=1_000_000):
+def evaluate_agent(path:str, MAX_EPISODES:int=1_000_000):
+    stats = StatsRecorder(1_000_000, 
+                        200, 
+                        1,
+                        3, 
+                        log_dir="logs/eval")
     # env = gym.make('MountainCar-v0', render_mode="human")
     env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode="human")
-    agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
-    agent.load(path)
     total_steps = 0
     total_episodes = 0
+    agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+    agent.load(path)
     while total_episodes < MAX_EPISODES:
         done = False
         state, _ = env.reset()
@@ -151,6 +159,7 @@ def evaluate_agent(path:str, stats:StatsRecorder, MAX_EPISODES:int=1_000_000):
             next_state, reward, terminated, truncated, _ = env.step(int(action))
             print(f"Reward: {reward}, Action: {action}", end="\r")
             env.render()
+            env.plot_state(next_state, reward)
             done = terminated or truncated
             state = next_state
             total_steps += 1
@@ -158,16 +167,44 @@ def evaluate_agent(path:str, stats:StatsRecorder, MAX_EPISODES:int=1_000_000):
         stats.stop_recording()
         total_episodes += 1
 
-
-
-def evaluate_last_model(stats:StatsRecorder, MAX_EPISODES:int=1_000_000):
+def evaluate_last_model(MAX_EPISODES:int=1_000_000):
     folder = "models"
-    files = os.listdir(folder)
-    if len(files) == 0:
-        raise ValueError("No models to evaluate")
-    files.sort()
-    latest_model = files[-1]
-    evaluate_agent(os.path.join(folder, latest_model), stats, MAX_EPISODES)
+    
+    stats = StatsRecorder(1_000_000, 
+                        200, 
+                        1,
+                        3, 
+                        log_dir="logs/eval")
+    
+    # env = gym.make('MountainCar-v0', render_mode="human")
+    env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode="human")
+    total_steps = 0
+    total_episodes = 0
+    agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+    while total_episodes < MAX_EPISODES:
+        files = os.listdir(folder)
+        if len(files) == 0:
+            raise ValueError("No models to evaluate")
+        files.sort()
+        latest_model = files[-1]
+        path = os.path.join(folder, latest_model)
+        agent.load(path)
+
+        done = False
+        state, _ = env.reset()
+        stats.start_recording()
+        while not done:
+            action = agent.select_action(state)
+            next_state, reward, terminated, truncated, _ = env.step(int(action))
+            print(f"Reward: {reward}, Action: {action}", end="\r")
+            env.render()
+            env.plot_state(next_state, reward)
+            done = terminated or truncated
+            state = next_state
+            total_steps += 1
+            stats.record_reward(reward)
+        stats.stop_recording()
+        total_episodes += 1
     
 if __name__ == "__main__":
 
@@ -175,27 +212,25 @@ if __name__ == "__main__":
 
     if len(args) > 0:
         if args[0] == "--eval":
-            stats = StatsRecorder(1_000_000, 200, 1, log_dir="logs/eval")
-            evaluate_last_model(stats)
-            generate_graphs(stats)
+            evaluate_last_model()
             sys.exit(0)
         elif args[0] == "--train":
             # env = gym.make('MountainCar-v0')
             env = gym.make('gyms:gyms/CustomMountainCar-v0')
 
             # Training parameters
-            total_episodes = 1_000
-            MAX_EPISODES = total_episodes//10
+            total_episodes = 3000
+            MAX_EPISODES = total_episodes // 30
 
             # agent parameters
             obs_dim = env.observation_space.shape[0]
             num_actions = env.action_space.n
             BULK_SIZE = 1
             MAX_STEPS = 200
-            BATCH_SIZE = 64
+            BATCH_SIZE = 512
             gamma = 0.99
-            #epsilon = 0.1
-            epsilon = lambda iter: max(0.9*np.exp(-iter/(total_episodes/10)), 0.05)
+            # epsilon = lambda iter: max(0.9*np.exp(-iter/(total_episodes/10)), 0.05)
+            epsilon = lambda iter: max(0.9*np.exp(-(iter*10/total_episodes)), 0.07)
             alpha = 0.001
 
             stats = StatsRecorder(total_episodes, 
@@ -219,9 +254,14 @@ if __name__ == "__main__":
             # agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
             train_agent(env, agent, stats)
 
-            replay_episode(agent.replay_buffer, MAX_EPISODES-1)
+            evaluate_last_model()
 
-            generate_graphs(stats, agent_name=agent.__class__.__name__)
+            # launch tensorboard
+            os.system("./launch_tensorboard_train.sh")
+
+            # replay_episode(agent.replay_buffer, MAX_EPISODES-1)
+
+            # generate_graphs(stats, agent_name=agent.__class__.__name__)
 
             print("hello")
             sys.exit(0)

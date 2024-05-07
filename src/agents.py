@@ -56,13 +56,15 @@ class DqnAgent():
         self.stay_counter = 0
         self.left_counter = 0
 
-
+        network_width = 32
 
         # Initialize the Q-network
         self.q_network = torch.nn.Sequential(
-            torch.nn.Linear(obs_dim, 64),
-            torch.nn.Linear(64, 64),
-            torch.nn.Linear(64, num_actions)
+            torch.nn.Linear(obs_dim, network_width),
+            torch.nn.ReLU(),
+            torch.nn.Linear(network_width, network_width),
+            torch.nn.ReLU(),
+            torch.nn.Linear(network_width, num_actions)
         )
         self.loss = torch.nn.MSELoss(reduction='mean')
         self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=self.alpha)
@@ -81,6 +83,7 @@ class DqnAgent():
             if os.path.exists(model_folder):
                 for file in os.listdir(model_folder):
                     os.remove(os.path.join(model_folder, file))
+                    print(f"Removed {file}")
             else:
                 os.makedirs(model_folder)
         
@@ -91,7 +94,8 @@ class DqnAgent():
     @torch.no_grad()
     def select_action(self, state, iter:int=0):
         e = self.get_epsilon_value(iter)
-        self.stats.record_epsilon(e)
+        if self.stats is not None:
+            self.stats.record_epsilon(e)
         if np.random.rand() < e:
             return np.random.randint(0, self.num_actions)
         else:
@@ -105,14 +109,15 @@ class DqnAgent():
         # sample a batch from the replay buffer
         batch = self.replay_buffer.sample(self.BATCH_SIZE)
         batch = torch.tensor(batch, dtype=torch.float32)
-        self.optimizer.zero_grad()
-        #Forward pass
         states, actions, next_states, rewards, dones = torch.split(batch, split_size_or_sections=[self.obs_dim, 1, self.obs_dim, 1, 1], dim=1)
         done_mask = 1 - dones
+        with torch.no_grad():
+            next_Q_values = self.q_network(next_states) * done_mask
+            target_Q_values = next_Q_values.max(dim=1).values * self.discount + rewards
+        self.optimizer.zero_grad() # zero the gradients before the forward pass
+        #Forward pass
         Q_values = self.q_network(states)[:, actions.type(torch.int64)]
-        next_Q_values = self.q_network(next_states) * done_mask
-        target_Q_values = next_Q_values.max(dim=1).values * self.discount + rewards
-        loss = self.loss(Q_values, target_Q_values)
+        loss = self.loss(Q_values, target_Q_values.unsqueeze(2))
         loss.backward()
         self.optimizer.step()
 
