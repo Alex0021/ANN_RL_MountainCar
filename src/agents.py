@@ -33,10 +33,10 @@ class DqnAgent():
                  BATCH_SIZE:int=64,
                  stats:StatsRecorder=None,
                  model_folder:str="models",
-                 export_frequency:int=1000,
+                 export_frequency:int=1_000,
                  eval = False,
                  use_target_network = False,
-                 target_update_freq = 1000):
+                 target_update_freq = 10_000):
         
         self.num_actions = num_actions
         self.dim = obs_dim * 2 + 3 # state + action + next_state + reward + done 
@@ -57,6 +57,7 @@ class DqnAgent():
         self.right_counter = 0
         self.stay_counter = 0
         self.left_counter = 0
+        self.mean_loss = 0
 
         network_width = 32
 
@@ -98,9 +99,10 @@ class DqnAgent():
         # clear models folder
         if not eval:
             if os.path.exists(model_folder):
+                print("Clearing models folder...", end="", flush=True)
                 for file in os.listdir(model_folder):
                     os.remove(os.path.join(model_folder, file))
-                    print(f"Removed {file}")
+                print("DONE")
             else:
                 os.makedirs(model_folder)
         
@@ -164,9 +166,11 @@ class DqnAgent():
                 self.Q_head_left_avg = (self.Q_head_left_avg*(self.left_counter) + Q_head_left_avg.item()) / (self.left_counter + 1)
                 self.left_counter += 1
             
+            self.mean_loss = (self.mean_loss*(self.update_counter) + float(loss.item())) / (self.update_counter + 1)
             self.update_counter += 1
             self.stats.log(**{
                 "training/loss": (self.update_counter, float(loss.item())),
+                "training/loss_mean": (self.update_counter, self.mean_loss),
                 "training/mean_Q": (self.update_counter, float(self.Q_avg)),
                 "training/Q_head_right": (self.right_counter, float(self.Q_head_right_avg)),
                 "training/Q_head_stay": (self.stay_counter, float(self.Q_head_stay_avg)),
