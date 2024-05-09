@@ -3,6 +3,35 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import platform
 
+SH_SCRIPT = """
+            # Check most recent dir
+            logdir="./logs/*"
+            # Check env var
+            SERVER_MODE=${TENSORBOARD_SERVER:-0}
+            if [ $SERVER_MODE -eq 1 ]; then
+                # fixed port
+                port=6006
+                echo "Starting tensorboard: $logdir"
+                tensorboard --logdir=$logdir --port=$port --bind_all
+            else
+                # random port
+                port=$(((RANDOM%1000)+6006))
+                echo "Starting tensorboard: $logdir"
+                open http://localhost:$port
+                tensorboard --logdir=$logdir --port=$port
+            fi
+            """
+
+BAT_SCRIPT = """
+            @echo off
+            rem # random port
+            set /a "port=(%RANDOM% %% 1000) + 6006"
+            set logdir=./logs/*
+            echo Starting tensorboard: %logdir%
+            start http://localhost:%port%
+            tensorboard --logdir=%logdir% --port=%port%
+            """
+
 class StatsRecorder:
     def __init__(self, episode_num: int, steps_num: int, bulk_size: int, action_num:int, log_dir: str="logs/train"):
         assert episode_num % bulk_size == 0, "Bulk size must be a multiple of the number of episodes."
@@ -21,25 +50,10 @@ class StatsRecorder:
         # create and write "launch_tensorboard" file
         if platform.system() == "Windows":
             file_extension = ".bat"
-            str_code = """
-            @echo off
-            rem # random port
-            set /a "port=(%RANDOM% %% 1000) + 6006"
-            set logdir=./
-            echo Starting tensorboard: %logdir%
-            start http://localhost:%port%
-            tensorboard --logdir=%logdir% --port=%port%
-            """
+            str_code = BAT_SCRIPT
         else:
             file_extension = ".sh"
-            str_code = """
-            # random port
-            port=$(((RANDOM%1000)+6006))
-            logdir="./logs/*"
-            echo "Starting tensorboard: $logdir"
-            open http://localhost:$port
-            tensorboard --logdir=$logdir --port=$port
-            """
+            str_code = SH_SCRIPT
         path = log_dir + "/" + dir_name + "/launch_tensorboard" + file_extension
         with open(path, "w") as f:
             f.write(str_code)
