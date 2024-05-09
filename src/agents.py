@@ -192,10 +192,11 @@ class DqnAgent():
     def load(self, path):
         self.q_network.load_state_dict(torch.load(path, map_location=self.device))
         self.q_network.eval()
-
+    
+    @torch.no_grad()
     def get_q_values(self, states):
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
-        return self.q_network(states).numpy()
+        return self.q_network(states).to("cpu").numpy()
 
 
 class DynaAgent():

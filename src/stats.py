@@ -83,17 +83,23 @@ class StatsRecorder:
         self.episode_index = 0
         self.step_index = 0
 
-    def record_reward(self, reward):
+    def record_reward(self, rewards):
         assert self.step_index < self.steps_num, "Number of steps exceeded! Maybe call to stop recording is missing"
+        reward = np.sum(rewards)
         self.episode_rewards[self.episode_index, self.step_index] = reward
         self.step_index += 1
         self.total_steps += 1
         self.log(**{
-            "steps/step_reward": (self.total_steps, reward),
+            "steps/env_reward": (self.total_steps, rewards[0]),
+            "steps/aux_reward": (self.total_steps, rewards[1]),
+            "steps/total_reward": (self.total_steps, reward)
         })
 
     def record_action(self, action):
         self.actions_count[action] += 1
+        self.log(**{
+            "steps/step_action": (self.total_steps, action)
+        })
 
     def record_epsilon(self, epsilon):
         self.current_epsilon = epsilon

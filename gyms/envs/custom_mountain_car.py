@@ -1,5 +1,7 @@
 from gymnasium.envs.classic_control.mountain_car import MountainCarEnv
 import numpy as np
+from matplotlib.collections import LineCollection
+from matplotlib import pyplot as plt
 
 class CustomMountainCar(MountainCarEnv):
 
@@ -8,6 +10,7 @@ class CustomMountainCar(MountainCarEnv):
         self.max_r = -np.inf
         self.max_l = -np.inf
         self.middle_x = -np.pi/6
+        self.fig = plt.figure(num=1)
 
     def step(self, action):
         state = self.state
@@ -22,10 +25,10 @@ class CustomMountainCar(MountainCarEnv):
         reward += 1 if terminated else 0
         speed  = abs(state[1])
         normed_speed = speed / 0.07
-        reward += normed_speed
+        aux_reward = normed_speed
         # reward += self.max_height_reward(state)
-        reward += self.normed_height(state[0])**2
-        return next_state, reward, terminated, truncated, _
+        aux_reward += self.normed_height(state[0])**2
+        return next_state, [reward, aux_reward], terminated, truncated, _
     
     def max_height_reward(self, state):
         n_height = self.normed_height(state[0])
@@ -45,20 +48,37 @@ class CustomMountainCar(MountainCarEnv):
     
     def curve(self, x):
         return np.sin(3 * x)
+    
+    def d_curve(self, x):
+        return 3 * np.cos(3 * x)
 
-    def plot_state(self, state, reward):
-        from matplotlib import pyplot as plt
+    def plot_state(self, state, reward, agent=None):
         plt.ion()
         x = np.linspace(self.min_position, self.max_position, 100)
         # curve = lambda x: np.cos(3 * (x + (np.pi / 3 - 0.5)))
         y = self.curve(x)
-        plt.clf()
-        plt.plot(x, y)
-        plt.scatter(state[0], self.curve(state[0]))
-        text = f"Reward: {reward}"
-        plt.title(text, fontsize=12)
+        self.fig.clf()
+        ax = self.fig.add_subplot(111)
+        if agent:
+            q_values = agent.get_q_values([[x, state[1]] for x in x])
+            v_values = np.mean(q_values, axis=1)
+            points = np.array([x, y]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            norm = plt.Normalize(v_values.min(), v_values.max())
+            lc = LineCollection(segments, cmap='jet', norm=norm)
+            # Set the values used for colormapping
+            lc.set_array(v_values)
+            lc.set_linewidth(2)
+            line = ax.add_collection(lc)
+            cb = self.fig.colorbar(line, ax=ax)
+            cb.set_label('V-value')
+        else:
+            ax.plot(x, y)
+        ax.scatter(state[0], self.curve(state[0]), s=100, c='k', marker='o')
+        text = f"Reward: {reward:.4f}"
+        self.fig.suptitle(text, fontsize=12)
         # v line at middle
-        plt.axvline(x=self.middle_x, color='r')
+        ax.axvline(x=self.middle_x, color='r')
         plt.draw()
         plt.pause(0.001)
 

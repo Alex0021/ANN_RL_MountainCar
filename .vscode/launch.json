@@ -22,5 +22,15 @@
                 "--eval"
             ],
         },
+        {
+            "name": "Run generate plots",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/generate_plots.py",
+            "args": [
+                "--folder",
+                "logs/train/2024-05-09-06-22-18"
+            ],
+        },
     ]
 }

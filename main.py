@@ -127,12 +127,13 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
         while not done:
             action = agent.select_action(state, i)
             stats.record_action(int(action))
-            next_state, reward, terminated, truncated, _ = env.step(int(action))
+            next_state, rewards, terminated, truncated, _ = env.step(int(action))
+            reward = np.sum(rewards)
             done  = terminated or truncated
             agent.observe(state, action, next_state, reward, done)
             if total_steps >= EPISODE_DELAY*MAX_STEPS:
                 agent.update()
-            stats.record_reward(reward)
+            stats.record_reward(rewards)
             state = next_state
             total_steps += 1
         total_episodes += 1
@@ -156,15 +157,16 @@ def evaluate_agent(path:str, MAX_EPISODES:int=1_000_000):
         episode_steps = 1
         while not done:
             action = agent.select_action(state)
-            next_state, reward, terminated, truncated, _ = env.step(int(action))
+            next_state, rewards, terminated, truncated, _ = env.step(int(action))
+            reward = np.sum(rewards)
             print("                                            ", end="\r")
             print(f"Reward: {reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
             env.render()
-            env.plot_state(next_state, reward)
+            env.plot_state(next_state, reward, agent=agent)
             done = terminated or truncated
             state = next_state
             episode_steps += 1
-            stats.record_reward(reward)
+            stats.record_reward(rewards)
         stats.stop_recording()
         total_episodes += 1
 
@@ -197,14 +199,15 @@ def evaluate_last_model(MAX_EPISODES:int=1_000_000):
         episode_steps = 1
         while not done:
             action = agent.select_action(state)
-            next_state, reward, terminated, truncated, _ = env.step(int(action))
+            next_state, rewards, terminated, truncated, _ = env.step(int(action))
+            reward = np.sum(rewards)
             print("                                            ", end="\r")
             print(f"Reward: {reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
             env.render()
-            env.plot_state(next_state, reward)
+            env.plot_state(next_state, reward, agent=agent)
             done = terminated or truncated
             state = next_state
-            stats.record_reward(reward)
+            stats.record_reward(rewards)
             episode_steps += 1
         stats.stop_recording()
         total_episodes += 1
