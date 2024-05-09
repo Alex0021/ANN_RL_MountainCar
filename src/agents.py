@@ -34,7 +34,9 @@ class DqnAgent():
                  stats:StatsRecorder=None,
                  model_folder:str="models",
                  export_frequency:int=1000,
-                 eval = False):
+                 eval = False,
+                 use_target_network = False,
+                 target_update_freq = 1000):
         
         self.num_actions = num_actions
         self.dim = obs_dim * 2 + 3 # state + action + next_state + reward + done 
@@ -58,6 +60,9 @@ class DqnAgent():
 
         network_width = 32
 
+        # check if gpu available
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         # Initialize the Q-network
         self.q_network = torch.nn.Sequential(
             torch.nn.Linear(obs_dim, network_width),
@@ -65,10 +70,22 @@ class DqnAgent():
             torch.nn.Linear(network_width, network_width),
             torch.nn.ReLU(),
             torch.nn.Linear(network_width, num_actions)
-        )
+        ).to(self.device)
         self.loss = torch.nn.MSELoss(reduction='mean')
         self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=self.alpha)
         # torch.nn.init.xavier_uniform_(self.q_network[0].weight)
+        self.use_target_network = use_target_network
+        self.target_network_update_freq = target_update_freq
+        if use_target_network:
+            self.target_q_network = torch.nn.Sequential(
+                torch.nn.Linear(obs_dim, network_width),
+                torch.nn.ReLU(),
+                torch.nn.Linear(network_width, network_width),
+                torch.nn.ReLU(),
+                torch.nn.Linear(network_width, num_actions)
+            ).to(self.device)
+
+            self.target_q_network.load_state_dict(self.q_network.state_dict().copy())
 
         # Check for epsilon function
         if eval:
@@ -99,8 +116,9 @@ class DqnAgent():
         if np.random.rand() < e:
             return np.random.randint(0, self.num_actions)
         else:
-            state = torch.tensor(state, dtype=torch.float32)
-            return torch.argmax(self.q_network(state))
+            state = torch.tensor(state, dtype=torch.float32, device=self.device)
+            output = self.q_network(state)
+            return torch.argmax(output).item()
 
     @torch.enable_grad()
     def update(self) -> dict[str, tuple[int, float]]:
@@ -108,24 +126,29 @@ class DqnAgent():
             return
         # sample a batch from the replay buffer
         batch = self.replay_buffer.sample(self.BATCH_SIZE)
-        batch = torch.tensor(batch, dtype=torch.float32)
+        batch = torch.tensor(batch, dtype=torch.float32, device=self.device)
         states, actions, next_states, rewards, dones = torch.split(batch, split_size_or_sections=[self.obs_dim, 1, self.obs_dim, 1, 1], dim=1)
+        actions = actions.squeeze(1)
+        rewards = rewards.squeeze(1)
         done_mask = 1 - dones
         with torch.no_grad():
-            next_Q_values = self.q_network(next_states) * done_mask
+            if self.use_target_network:
+                next_Q_values = self.target_q_network(next_states) * done_mask
+            else:
+                next_Q_values = self.q_network(next_states) * done_mask
             target_Q_values = next_Q_values.max(dim=1).values * self.discount + rewards
         self.optimizer.zero_grad() # zero the gradients before the forward pass
         #Forward pass
-        Q_values = self.q_network(states)[:, actions.type(torch.int64)]
-        loss = self.loss(Q_values, target_Q_values.unsqueeze(2))
+        Q_values = self.q_network(states)[torch.arange(self.BATCH_SIZE), actions.type(torch.int64)]
+        loss = self.loss(Q_values, target_Q_values)
         loss.backward()
         self.optimizer.step()
 
         # Log the training data
         if self.stats is not None:
-            Q_head_right = Q_values[:, actions == 2]
-            Q_head_stay = Q_values[:, actions == 1]
-            Q_head_left = Q_values[:, actions == 0]
+            Q_head_right = Q_values[actions == 2]
+            Q_head_stay = Q_values[actions == 1]
+            Q_head_left = Q_values[actions == 0]
             Q_avg = Q_values.mean().item()
             Q_head_right_avg = Q_head_right.mean()
             Q_head_stay_avg = Q_head_stay.mean()
@@ -149,9 +172,13 @@ class DqnAgent():
                 "training/Q_head_stay": (self.stay_counter, float(self.Q_head_stay_avg)),
                 "training/Q_head_left": (self.left_counter, float(self.Q_head_left_avg)),
         })
+
             
         if self.update_counter % self.export_frequency == 0:
             self.save()
+        
+        if self.use_target_network and self.update_counter % self.target_network_update_freq == 0:
+            self.target_q_network.load_state_dict(self.q_network.state_dict().copy())
             
     def save(self):
         name = f"dqn_model_{self.update_counter}.pth"
@@ -159,7 +186,12 @@ class DqnAgent():
         torch.save(self.q_network.state_dict(), path)
 
     def load(self, path):
-        self.q_network.load_state_dict(torch.load(path))
+        self.q_network.load_state_dict(torch.load(path, map_location=self.device))
+        self.q_network.eval()
+
+    def get_q_values(self, states):
+        states = torch.tensor(states, dtype=torch.float32, device=self.device)
+        return self.q_network(states).numpy()
 
 
 class DynaAgent():
