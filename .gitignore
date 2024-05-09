@@ -163,3 +163,5 @@ cython_debug/
 logs/train/
 logs/eval/
 models/
+
+*.code-workspace
