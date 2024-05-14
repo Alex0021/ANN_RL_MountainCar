@@ -1,6 +1,6 @@
 import gymnasium as gym
 import numpy as np
-from src.agents import RandomAgent, DqnAgent
+from src.agents import RandomAgent, DqnAgent, DqnAgentRND
 from src.stats import StatsRecorder
 import matplotlib.pyplot as plt
 import tqdm
@@ -115,10 +115,45 @@ def generate_graphs(stats:StatsRecorder, agent_name:str="agent"):
 
     plt.show()
 
-def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
-    EPISODE_DELAY = 5
+def train_rnd_agent(env:gym.Env, agent:DqnAgentRND, stats:StatsRecorder):
     total_steps = 0
     total_episodes = 0
+    np.random.seed(np.random.randint(0, 10000000))
+    agent.stats = stats
+    # First pass: collect state data for mean and std calculation
+    print("Collecting state data for RND normalization...")
+    for i in range(agent.RND_NORMALIZE_DELAY):
+        done = False
+        state, _ = env.reset()
+        while not done:
+            action = np.random.randint(0, agent.num_actions)
+            next_state, tot_reward, terminated, truncated, infos = env.step(action)
+            done = terminated or truncated
+            agent.observe_rnd(next_state)
+            state = next_state
+            total_steps += 1
+    print("Starting training...")
+    for i in tqdm.tqdm(range(stats.episode_num), ncols=75):
+        done = False
+        state, _ = env.reset()
+        stats.start_recording()
+        while not done:
+            action = agent.select_action(state, i)
+            next_state, tot_reward, terminated, truncated, infos = env.step(int(action))
+            aux_reward = infos.get("aux_reward", 0)
+            reward = infos.get("env_reward", 0)
+            done = terminated or truncated
+            agent.observe(state, action, next_state, reward, aux_reward, done)
+            agent.update()
+            state = next_state
+            total_steps += 1
+        total_episodes += 1
+        stats.stop_recording()
+
+def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
+    total_steps = 0
+    total_episodes = 0
+    agent.stats = stats
     np.random.seed(np.random.randint(0, 10000000))
     for i in tqdm.tqdm(range(stats.episode_num), ncols=75):
         done = False
@@ -126,20 +161,18 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
         stats.start_recording()
         while not done:
             action = agent.select_action(state, i)
-            stats.record_action(int(action))
-            next_state, rewards, terminated, truncated, _ = env.step(int(action))
-            reward = np.sum(rewards)
+            next_state, tot_reward, terminated, truncated, infos = env.step(int(action))
+            aux_reward = infos.get("aux_reward", 0)
+            reward = infos.get("env_reward", 0)
             done  = terminated or truncated
-            agent.observe(state, action, next_state, reward, done)
-            if total_steps >= EPISODE_DELAY*MAX_STEPS:
-                agent.update()
-            stats.record_reward(rewards)
+            agent.observe(state, action, next_state, reward, aux_reward, done)
+            agent.update()
             state = next_state
             total_steps += 1
         total_episodes += 1
         stats.stop_recording()
 
-def evaluate_agent(path:str, MAX_EPISODES:int=1_000_000):
+def evaluate_agent(agent, path:str, MAX_EPISODES:int=1_000_000):
     stats = StatsRecorder(1_000_000, 
                         200, 
                         1,
@@ -158,15 +191,14 @@ def evaluate_agent(path:str, MAX_EPISODES:int=1_000_000):
         while not done:
             action = agent.select_action(state)
             next_state, rewards, terminated, truncated, _ = env.step(int(action))
-            reward = np.sum(rewards)
+            reward, aux_reward = rewards
             print("                                            ", end="\r")
-            print(f"Reward: {reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
+            print(f"Reward: {reward+aux_reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
             env.render()
             env.plot_state(next_state, reward, agent=agent)
             done = terminated or truncated
             state = next_state
             episode_steps += 1
-            stats.record_reward(rewards)
         stats.stop_recording()
         total_episodes += 1
 
@@ -185,6 +217,7 @@ def evaluate_last_model(MAX_EPISODES:int=1_000_000):
     agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
     while total_episodes < MAX_EPISODES:
         files = os.listdir(folder)
+        files = [f for f in files if f.startswith(agent.__class__.__name__)]
         if len(files) == 0:
             raise ValueError("No models to evaluate")
         files.sort(key=lambda f: int(''.join(filter(str.isdigit, f))))
@@ -199,15 +232,14 @@ def evaluate_last_model(MAX_EPISODES:int=1_000_000):
         episode_steps = 1
         while not done:
             action = agent.select_action(state)
-            next_state, rewards, terminated, truncated, _ = env.step(int(action))
-            reward = np.sum(rewards)
+            next_state, tot_reward, terminated, truncated, infos = env.step(int(action))
+            reward, aux_reward = infos.get("env_reward", 0), infos.get("aux_reward", 0)
             print("                                            ", end="\r")
-            print(f"Reward: {reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
+            print(f"Reward: {tot_reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
             env.render()
             env.plot_state(next_state, reward, agent=agent)
             done = terminated or truncated
             state = next_state
-            stats.record_reward(rewards)
             episode_steps += 1
         stats.stop_recording()
         total_episodes += 1
@@ -216,72 +248,99 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
 
-    if len(args) > 0:
-        if args[0] == "--eval":
-            if len(args) > 1:
-                if args[1] == "--last":
-                    evaluate_last_model()
-                elif args[1] == "--model":
-                    if len(args) > 2:
-                        path = os.path.join("models", f"{args[2]}.pth")
-                        evaluate_agent(path=path)
-                    else:
-                        raise ValueError("No model number provided")
+    # env = gym.make('MountainCar-v0')
+    env = gym.make('gyms:gyms/CustomMountainCar-v0')
+
+    # Training parameters
+    total_episodes = 3_000
+    MAX_EPISODES = 100
+
+    # agent parameters
+    obs_dim = env.observation_space.shape[0]
+    num_actions = env.action_space.n
+    BULK_SIZE = 1
+    MAX_STEPS = 200
+    BATCH_SIZE = 64
+    gamma = 0.99
+    # epsilon = lambda iter: max(0.9*np.exp(-iter/(total_episodes/10)), 0.05)
+    epsilon = lambda iter: max(np.exp(-(iter*5/total_episodes)), 0.07)
+    alpha = 1e-3
+
+    if len(args) < 3:
+        raise ValueError("Needs at least 3 arguments: --agent [random|dqn|dqn-rnd] --train|--eval [--last|--model <model_number>]")
+
+    if args[0] == "--train":
+        eval_mode = False
+    elif args[0] == "--eval":
+        eval_mode = True
+    else:
+        raise ValueError("Specify train or eval mode as first argument")
+    
+    agent_arg_idx = args.index("--agent")
+    if args[agent_arg_idx+1] == "random":
+        agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
+    elif args[agent_arg_idx+1] == "dqn":
+        agent = DqnAgent(env.action_space.n, 
+                        env.observation_space.shape[0], 
+                        discount=gamma, 
+                        epsilon=epsilon, 
+                        alpha=alpha, 
+                        MAX_STEPS=MAX_STEPS, 
+                        MAX_EPISODES=MAX_EPISODES, 
+                        BATCH_SIZE=BATCH_SIZE, 
+                        use_target_network=True,
+                        eval=eval_mode
+                        )
+    elif args[agent_arg_idx+1] == "dqn-rnd":
+        agent = DqnAgentRND(env.action_space.n, 
+                        env.observation_space.shape[0], 
+                        discount=gamma, 
+                        epsilon=epsilon, 
+                        alpha=alpha, 
+                        MAX_STEPS=MAX_STEPS, 
+                        MAX_EPISODES=MAX_EPISODES, 
+                        BATCH_SIZE=BATCH_SIZE, 
+                        use_target_network=True,
+                        eval=eval_mode
+        )
+    else:
+        raise ValueError("Invalid agent type")
+    
+
+    # Folder specified for eval
+    if eval_mode:
+        if args[1] == "--last":
+            evaluate_last_model()
+        elif args[1] == "--model":
+            if len(args) > 2:
+                path = os.path.join("models", f"{args[2]}.pth")
+                evaluate_agent(path=path)
             else:
-                evaluate_last_model()
-            sys.exit(0)
-        elif args[0] == "--train":
-            # env = gym.make('MountainCar-v0')
-            env = gym.make('gyms:gyms/CustomMountainCar-v0')
-
-            # Training parameters
-            total_episodes = 3_000
-            MAX_EPISODES = 100
-
-            # agent parameters
-            obs_dim = env.observation_space.shape[0]
-            num_actions = env.action_space.n
-            BULK_SIZE = 1
-            MAX_STEPS = 200
-            BATCH_SIZE = 64
-            gamma = 0.99
-            # epsilon = lambda iter: max(0.9*np.exp(-iter/(total_episodes/10)), 0.05)
-            epsilon = lambda iter: max(np.exp(-(iter*5/total_episodes)), 0.07)
-            alpha = 1e-3
-
-            stats = StatsRecorder(total_episodes, 
-                                MAX_STEPS, 
-                                BULK_SIZE,
-                                num_actions,
-                                log_dir="logs/train"
-                                )
-            
-            agent = DqnAgent(num_actions, 
-                            obs_dim, 
-                            discount=gamma, 
-                            epsilon=epsilon, 
-                            alpha=alpha, 
-                            MAX_STEPS=MAX_STEPS, 
-                            MAX_EPISODES=MAX_EPISODES, 
-                            BATCH_SIZE=BATCH_SIZE, 
-                            stats=stats,
-                            use_target_network=True
+                raise ValueError("No model number provided")
+        else:
+            evaluate_last_model()
+        sys.exit(0)
+    else:
+        stats = StatsRecorder(total_episodes, 
+                            MAX_STEPS, 
+                            BULK_SIZE,
+                            num_actions,
+                            log_dir="logs/train"
                             )
-            
-            # agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
+        if agent.__class__.__name__ == "DqnAgentRND":
+            train_rnd_agent(env, agent, stats)
+        else:
             train_agent(env, agent, stats)
 
-            #evaluate_last_model()
+        #evaluate_last_model()
 
-            # launch tensorboard
-            #os.system("./launch_tensorboard_train.sh")
+        # launch tensorboard
+        #os.system("./launch_tensorboard_train.sh")
 
-            # replay_episode(agent.replay_buffer, MAX_EPISODES-1)
+        # replay_episode(agent.replay_buffer, MAX_EPISODES-1)
 
-            # generate_graphs(stats, agent_name=agent.__class__.__name__)
+        # generate_graphs(stats, agent_name=agent.__class__.__name__)
 
-            print("hello")
-            sys.exit(0)
-        else:
-            raise ValueError("Invalid argument")
+        print("hello")
+        sys.exit(0)
 

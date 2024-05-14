@@ -7,15 +7,19 @@ import os
 import types
 
 class RandomAgent():
-    def __init__(self, num_actions:int, obs_dim:int, MAX_STEPS:int=200, MAX_EPISODES:int=1):
+    def __init__(self, num_actions:int, obs_dim:int, MAX_STEPS:int=200, MAX_EPISODES:int=1, stats:StatsRecorder=None):
         self.num_actions = num_actions
-        self.dim = obs_dim * 2 + 2
+        self.dim = obs_dim * 2 + 4
         self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
+        self.stats = stats
 
-    def observe(self, state, action, next_state, reward, done=False):
+    def observe(self, state, action, next_state, reward, aux_reward, done=False):
+        # Save reward and action
+        self.stats.record_action(action)
+        self.stats.record_reward(reward, aux_reward)
         self.replay_buffer.add(state, action, next_state, reward, done)
 
-    def select_action(self, state):
+    def select_action(self, state, iter:int=0):
         return np.random.randint(0, self.num_actions)
 
     def update(self):
@@ -36,10 +40,11 @@ class DqnAgent():
                  export_frequency:int=1_000,
                  eval = False,
                  use_target_network = False,
-                 target_update_freq = 10_000):
+                 target_update_freq = 10_000,
+                 STEPS_DELAY:int=1_000):
         
         self.num_actions = num_actions
-        self.dim = obs_dim * 2 + 3 # state + action + next_state + reward + done 
+        self.dim = obs_dim * 2 + 4 # state + action + next_state + reward + aux_reward + done 
         self.obs_dim = obs_dim
         self.discount = discount
         self.epsilon = epsilon
@@ -58,6 +63,7 @@ class DqnAgent():
         self.stay_counter = 0
         self.left_counter = 0
         self.mean_loss = 0
+        self.STEPS_DELAY = STEPS_DELAY
 
         network_width = 32
 
@@ -99,16 +105,18 @@ class DqnAgent():
         # clear models folder
         if not eval:
             if os.path.exists(model_folder):
-                print("Clearing models folder...", end="", flush=True)
-                for file in os.listdir(model_folder):
-                    os.remove(os.path.join(model_folder, file))
-                print("DONE")
+                print("Clearing models folder...")
+                self.clear_models(model_name=self.__class__.__name__)
             else:
                 os.makedirs(model_folder)
         
 
-    def observe(self, state, action, next_state, reward, done=False):
-        self.replay_buffer.add(state, action, next_state, reward, done)
+    def observe(self, state, action, next_state, reward, aux_reward, done=False):
+        # Save reward and action
+        self.stats.record_action(action)
+        self.stats.record_reward(reward, aux_reward)
+        # Store to buffer
+        self.replay_buffer.add(state, action, next_state, reward, aux_reward, done)
 
     @torch.no_grad()
     def select_action(self, state, iter:int=0):
@@ -124,14 +132,14 @@ class DqnAgent():
 
     @torch.enable_grad()
     def update(self) -> dict[str, tuple[int, float]]:
-        if self.replay_buffer.total_size < self.BATCH_SIZE:
+        if self.replay_buffer.total_size < self.BATCH_SIZE or self.stats.total_steps < self.STEPS_DELAY:
             return
         # sample a batch from the replay buffer
         batch = self.replay_buffer.sample(self.BATCH_SIZE)
         batch = torch.tensor(batch, dtype=torch.float32, device=self.device)
-        states, actions, next_states, rewards, dones = torch.split(batch, split_size_or_sections=[self.obs_dim, 1, self.obs_dim, 1, 1], dim=1)
+        states, actions, next_states, rewards, dones = torch.split(batch, split_size_or_sections=[self.obs_dim, 1, self.obs_dim, 2, 1], dim=1)
         actions = actions.squeeze(1)
-        rewards = rewards.squeeze(1)
+        rewards = rewards.sum(dim=1)
         done_mask = 1 - dones
         with torch.no_grad():
             if self.use_target_network:
@@ -145,8 +153,16 @@ class DqnAgent():
         loss = self.loss(Q_values, target_Q_values)
         loss.backward()
         self.optimizer.step()
-
         # Log the training data
+        self._save_update_stats(Q_values, actions, loss)
+            
+        if self.update_counter % self.export_frequency == 0:
+            self.save(model_name=self.__class__.__name__)
+        
+        if self.use_target_network and self.update_counter % self.target_network_update_freq == 0:
+            self.target_q_network.load_state_dict(self.q_network.state_dict().copy())
+
+    def _save_update_stats(self, Q_values, actions, loss):
         if self.stats is not None:
             Q_head_right = Q_values[actions == 2]
             Q_head_stay = Q_values[actions == 1]
@@ -176,16 +192,9 @@ class DqnAgent():
                 "training/Q_head_stay": (self.stay_counter, float(self.Q_head_stay_avg)),
                 "training/Q_head_left": (self.left_counter, float(self.Q_head_left_avg)),
         })
-
             
-        if self.update_counter % self.export_frequency == 0:
-            self.save()
-        
-        if self.use_target_network and self.update_counter % self.target_network_update_freq == 0:
-            self.target_q_network.load_state_dict(self.q_network.state_dict().copy())
-            
-    def save(self):
-        name = f"dqn_model_{self.update_counter}.pth"
+    def save(self, model_name:str='agentXXX'):
+        name = f"{model_name}_model_{self.update_counter}.pth"
         path = self.model_folder + "/" + name
         torch.save(self.q_network.state_dict(), path)
 
@@ -193,10 +202,145 @@ class DqnAgent():
         self.q_network.load_state_dict(torch.load(path, map_location=self.device))
         self.q_network.eval()
     
+    def clear_models(self, model_name:str='agentXXX'):
+        for file in os.listdir(self.model_folder):
+            if file.startswith(model_name):
+                os.remove(os.path.join(self.model_folder, file))
+    
     @torch.no_grad()
     def get_q_values(self, states):
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
         return self.q_network(states).to("cpu").numpy()
+
+class DqnAgentRND(DqnAgent):
+    def __init__(self, num_actions:int, 
+                 obs_dim:int, 
+                 discount:float=0.99, 
+                 epsilon:float|Callable=0.1, 
+                 alpha:int=0.1, 
+                 MAX_STEPS:int=200, 
+                 MAX_EPISODES:int=1, 
+                 BATCH_SIZE:int=64,
+                 reward_factor:float=2.0,
+                 RND_NORMALIZE_DELAY:int=5,
+                 rnd_alpha:float=0.1,
+                 stats:StatsRecorder=None,
+                 model_folder:str="models",
+                 export_frequency:int=1_000,
+                 eval:bool=False,
+                 use_target_network:bool=False,
+                 target_update_freq:int=10_000):
+        super().__init__(num_actions, obs_dim, discount, epsilon, alpha, 
+                         MAX_STEPS, MAX_EPISODES, BATCH_SIZE, stats, model_folder, 
+                         export_frequency, eval, use_target_network, target_update_freq)
+
+        self.reward_factor = reward_factor
+        self.RND_NORMALIZE_DELAY = RND_NORMALIZE_DELAY*MAX_STEPS
+        self.rnd_state_mean = np.zeros(obs_dim)
+        self.rnd_state_var = np.zeros(obs_dim)
+        self.rnd_reward_mean = 0
+        self.rnd_reward_var = 0
+        self.rnd_update_state_counter = 0
+        self.rnd_update_reward_counter = 0
+
+        # Initialize RND networks
+        RND_LAYER_SIZE = 32
+        self.rnd_target = torch.nn.Sequential(
+            torch.nn.Linear(obs_dim, RND_LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(RND_LAYER_SIZE, RND_LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(RND_LAYER_SIZE, 1)
+        ).to(self.device)
+
+        self.rnd_predictor = torch.nn.Sequential(
+            torch.nn.Linear(obs_dim, RND_LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(RND_LAYER_SIZE, RND_LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(RND_LAYER_SIZE, 1)
+        ).to(self.device)
+
+        self.rnd_predictor_optimizer = torch.optim.Adam(self.rnd_predictor.parameters(), lr=rnd_alpha)
+        self.rnd_predictor_loss = torch.nn.MSELoss(reduction='mean')
+
+    @torch.enable_grad()
+    def update(self) -> dict[str, tuple[int, float]]:
+        if self.replay_buffer.total_size < self.BATCH_SIZE or self.stats.total_steps < self.STEPS_DELAY:
+            return
+        # Update Q-network
+        # sample a batch from the replay buffer
+        batch = self.replay_buffer.sample(self.BATCH_SIZE)
+        batch = torch.tensor(batch, dtype=torch.float32, device=self.device)
+        states, actions, next_states, rewards, dones = torch.split(batch, split_size_or_sections=[self.obs_dim, 1, self.obs_dim, 2, 1], dim=1)
+        actions = actions.squeeze(1)
+        # Normalize aux reward
+        aux_rewards = rewards[:,1]
+        aux_rewards = (aux_rewards - self.rnd_reward_mean) / np.sqrt(self.rnd_reward_var)
+        # Find total rewards
+        rewards = rewards[:,0] + aux_rewards * self.reward_factor
+        done_mask = 1 - dones
+        with torch.no_grad():
+            if self.use_target_network:
+                next_Q_values = self.target_q_network(next_states) * done_mask
+            else:
+                next_Q_values = self.q_network(next_states) * done_mask
+            target_Q_values = next_Q_values.max(dim=1).values * self.discount + rewards
+        self.optimizer.zero_grad() # zero the gradients before the forward pass
+        #Forward pass
+        Q_values = self.q_network(states)[torch.arange(self.BATCH_SIZE), actions.type(torch.int64)]
+        loss = self.loss(Q_values, target_Q_values)
+        loss.backward()
+        self.optimizer.step()
+        # Update RND network
+        self.rnd_predictor_optimizer.zero_grad()
+        norm_states = (next_states.to('cpu') - self.rnd_state_mean) / np.sqrt(self.rnd_state_var)
+        norm_states = torch.tensor(norm_states, device=self.device, dtype=torch.float32)
+        pred = self.rnd_predictor(norm_states)
+        with torch.no_grad():
+            target = self.rnd_target(norm_states)
+        rnd_loss = self.rnd_predictor_loss(pred, target)
+        rnd_loss.backward()
+        self.rnd_predictor_optimizer.step()
+        # Log the training data
+        self._save_update_stats(Q_values, actions, loss)
+        
+        if self.update_counter % self.export_frequency == 0:
+            self.save(model_name=self.__class__.__name__)
+        
+        if self.use_target_network and self.update_counter % self.target_network_update_freq == 0:
+            self.target_q_network.load_state_dict(self.q_network.state_dict().copy())
+
+    @torch.no_grad()
+    def observe(self, state, action, next_state, reward, aux_reward, done=False):
+        # Update rnd state statistics
+        self.observe_rnd(next_state)
+        # Save action 
+        self.stats.record_action(action)
+        # Overwriting aux reward
+        norm_state = (next_state - self.rnd_state_mean) / np.sqrt(self.rnd_state_var)
+        input = torch.tensor(norm_state, device=self.device, dtype=torch.float32)
+        pred = self.rnd_predictor(input)
+        target = self.rnd_target(input)
+        aux_reward = self.rnd_predictor_loss(pred, target).item()
+        # Update rnd_reward statistics
+        old_reward_mean = self.rnd_reward_mean
+        self.rnd_reward_mean = (self.rnd_reward_mean*self.rnd_update_reward_counter + reward) / (self.rnd_update_reward_counter + 1)
+        self.rnd_reward_var = (self.rnd_reward_var*self.rnd_update_reward_counter + (aux_reward - self.rnd_reward_mean)*(aux_reward - old_reward_mean)) / (self.rnd_update_reward_counter + 1)
+        self.rnd_update_reward_counter += 1
+        
+        self.replay_buffer.add(state, action, next_state, reward, aux_reward, done)
+        # Save aux_reward to tensorboard
+        # Use estimate of current normalization factors
+        aux_reward_norm = (aux_reward - self.rnd_reward_mean) / np.sqrt(self.rnd_reward_var)
+        aux_reward_norm = np.clip(aux_reward_norm, -5, 5) * self.reward_factor
+        self.stats.record_reward(reward, aux_reward_norm)
+
+    def observe_rnd(self, next_state):
+        old_state_mean = self.rnd_state_mean.copy()
+        self.rnd_state_mean = (self.rnd_state_mean*self.rnd_update_state_counter + next_state) / (self.rnd_update_state_counter + 1)
+        self.rnd_state_var = (self.rnd_state_var*self.rnd_update_state_counter + (next_state - self.rnd_state_mean)*(next_state - old_state_mean)) / (self.rnd_update_state_counter + 1)
+        self.rnd_update_state_counter += 1
 
 
 class DynaAgent():

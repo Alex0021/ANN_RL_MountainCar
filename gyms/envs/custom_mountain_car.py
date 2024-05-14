@@ -28,7 +28,7 @@ class CustomMountainCar(MountainCarEnv):
         aux_reward = normed_speed
         # reward += self.max_height_reward(state)
         aux_reward += self.normed_height(state[0])**2
-        return next_state, [reward, aux_reward], terminated, truncated, _
+        return next_state, reward+aux_reward, terminated, truncated, {"aux_reward": aux_reward, "env_reward": reward}
     
     def max_height_reward(self, state):
         n_height = self.normed_height(state[0])
