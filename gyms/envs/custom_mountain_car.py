@@ -22,7 +22,7 @@ class CustomMountainCar(MountainCarEnv):
         # reward += n_height * -1 * pos_sign * action_sign
 
         # reward += self.normed_height(state[0]) 
-        reward += 1 if terminated else 0
+        # reward += 1 if terminated else 0
         speed  = abs(state[1])
         normed_speed = speed / 0.07
         aux_reward = normed_speed
