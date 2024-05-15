@@ -115,11 +115,11 @@ def generate_graphs(stats:StatsRecorder, agent_name:str="agent"):
 
     plt.show()
 
-def train_rnd_agent(env:gym.Env, agent:DqnAgentRND, stats:StatsRecorder):
+def train_rnd_agent(env:gym.Env, agent:DqnAgentRND):
     total_steps = 0
     total_episodes = 0
     np.random.seed(np.random.randint(0, 10000000))
-    agent.stats = stats
+    stats = agent.stats
     # First pass: collect state data for mean and std calculation
     print("Collecting state data for RND normalization...")
     for i in range(agent.RND_NORMALIZE_DELAY):
@@ -129,7 +129,6 @@ def train_rnd_agent(env:gym.Env, agent:DqnAgentRND, stats:StatsRecorder):
             action = np.random.randint(0, agent.num_actions)
             next_state, tot_reward, terminated, truncated, infos = env.step(action)
             done = terminated or truncated
-            agent.observe_rnd(next_state)
             state = next_state
             total_steps += 1
     print("Starting training...")
@@ -150,10 +149,10 @@ def train_rnd_agent(env:gym.Env, agent:DqnAgentRND, stats:StatsRecorder):
         total_episodes += 1
         stats.stop_recording()
 
-def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, stats:StatsRecorder):
+def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent):
     total_steps = 0
     total_episodes = 0
-    agent.stats = stats
+    stats = agent.stats
     np.random.seed(np.random.randint(0, 10000000))
     for i in tqdm.tqdm(range(stats.episode_num), ncols=75):
         done = False
@@ -190,8 +189,9 @@ def evaluate_agent(agent, path:str, MAX_EPISODES:int=1_000_000):
         episode_steps = 1
         while not done:
             action = agent.select_action(state)
-            next_state, rewards, terminated, truncated, _ = env.step(int(action))
-            reward, aux_reward = rewards
+            next_state, reward, terminated, truncated, infos = env.step(int(action))
+            aux_reward = infos.get("aux_reward", 0)
+            reward = infos.get("env_reward", 0)
             print("                                            ", end="\r")
             print(f"Reward: {reward+aux_reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
             env.render()
@@ -263,7 +263,8 @@ if __name__ == "__main__":
     BATCH_SIZE = 64
     gamma = 0.99
     # epsilon = lambda iter: max(0.9*np.exp(-iter/(total_episodes/10)), 0.05)
-    epsilon = lambda iter: max(np.exp(-(iter*5/total_episodes)), 0.07)
+    # epsilon = lambda iter: max(np.exp(-(iter*5/total_episodes)), 0.07)
+    epsilon = 0
     alpha = 1e-3
 
     if len(args) < 3:
@@ -275,36 +276,6 @@ if __name__ == "__main__":
         eval_mode = True
     else:
         raise ValueError("Specify train or eval mode as first argument")
-    
-    agent_arg_idx = args.index("--agent")
-    if args[agent_arg_idx+1] == "random":
-        agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
-    elif args[agent_arg_idx+1] == "dqn":
-        agent = DqnAgent(env.action_space.n, 
-                        env.observation_space.shape[0], 
-                        discount=gamma, 
-                        epsilon=epsilon, 
-                        alpha=alpha, 
-                        MAX_STEPS=MAX_STEPS, 
-                        MAX_EPISODES=MAX_EPISODES, 
-                        BATCH_SIZE=BATCH_SIZE, 
-                        use_target_network=True,
-                        eval=eval_mode
-                        )
-    elif args[agent_arg_idx+1] == "dqn-rnd":
-        agent = DqnAgentRND(env.action_space.n, 
-                        env.observation_space.shape[0], 
-                        discount=gamma, 
-                        epsilon=epsilon, 
-                        alpha=alpha, 
-                        MAX_STEPS=MAX_STEPS, 
-                        MAX_EPISODES=MAX_EPISODES, 
-                        BATCH_SIZE=BATCH_SIZE, 
-                        use_target_network=True,
-                        eval=eval_mode
-        )
-    else:
-        raise ValueError("Invalid agent type")
     
 
     # Folder specified for eval
@@ -320,17 +291,51 @@ if __name__ == "__main__":
         else:
             evaluate_last_model()
         sys.exit(0)
+    
+    
+    stats = StatsRecorder(total_episodes, 
+                        MAX_STEPS, 
+                        BULK_SIZE,
+                        num_actions,
+                        log_dir="logs/train"
+                        )
+    
+    agent_arg_idx = args.index("--agent")
+    if args[agent_arg_idx+1] == "random":
+        agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
+    elif args[agent_arg_idx+1] == "dqn":
+        agent = DqnAgent(env.action_space.n, 
+                        env.observation_space.shape[0], 
+                        discount=gamma, 
+                        epsilon=epsilon, 
+                        alpha=alpha, 
+                        MAX_STEPS=MAX_STEPS, 
+                        MAX_EPISODES=MAX_EPISODES, 
+                        BATCH_SIZE=BATCH_SIZE, 
+                        use_target_network=True,
+                        eval=eval_mode,
+                        stats=stats
+                        )
+    elif args[agent_arg_idx+1] == "dqn-rnd":
+        agent = DqnAgentRND(env.action_space.n, 
+                        env.observation_space.shape[0], 
+                        discount=gamma, 
+                        epsilon=epsilon, 
+                        alpha=alpha, 
+                        MAX_STEPS=MAX_STEPS, 
+                        MAX_EPISODES=MAX_EPISODES, 
+                        BATCH_SIZE=BATCH_SIZE, 
+                        use_target_network=True,
+                        eval=eval_mode,
+                        stats=stats
+        )
     else:
-        stats = StatsRecorder(total_episodes, 
-                            MAX_STEPS, 
-                            BULK_SIZE,
-                            num_actions,
-                            log_dir="logs/train"
-                            )
-        if agent.__class__.__name__ == "DqnAgentRND":
-            train_rnd_agent(env, agent, stats)
-        else:
-            train_agent(env, agent, stats)
+        raise ValueError("Invalid agent type")
+    
+    if agent.__class__.__name__ == "DqnAgentRND":
+        train_rnd_agent(env, agent)
+    else:
+        train_agent(env, agent)
 
         #evaluate_last_model()
 
