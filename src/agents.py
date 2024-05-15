@@ -27,6 +27,7 @@ class RandomAgent():
 
 
 class DqnAgent():
+
     def __init__(self, num_actions:int, 
                  obs_dim:int, 
                  discount:float=0.99, 
@@ -109,7 +110,6 @@ class DqnAgent():
                 self.clear_models(model_name=self.__class__.__name__)
             else:
                 os.makedirs(model_folder)
-        
 
     def observe(self, state, action, next_state, reward, aux_reward, done=False):
         # Save reward and action
@@ -211,7 +211,6 @@ class DqnAgent():
     def get_q_values(self, states):
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
         return self.q_network(states).to("cpu").numpy()
-
 class DqnAgentRND(DqnAgent):
     def __init__(self, num_actions:int, 
                  obs_dim:int, 
@@ -230,39 +229,15 @@ class DqnAgentRND(DqnAgent):
                  eval:bool=False,
                  use_target_network:bool=False,
                  target_update_freq:int=10_000):
+        
         super().__init__(num_actions, obs_dim, discount, epsilon, alpha, 
                          MAX_STEPS, MAX_EPISODES, BATCH_SIZE, stats, model_folder, 
                          export_frequency, eval, use_target_network, target_update_freq)
-
+        
         self.reward_factor = reward_factor
         self.RND_NORMALIZE_DELAY = RND_NORMALIZE_DELAY*MAX_STEPS
-        self.rnd_state_mean = np.zeros(obs_dim)
-        self.rnd_state_var = np.zeros(obs_dim)
-        self.rnd_reward_mean = 0
-        self.rnd_reward_var = 0
-        self.rnd_update_state_counter = 0
-        self.rnd_update_reward_counter = 0
 
-        # Initialize RND networks
-        RND_LAYER_SIZE = 32
-        self.rnd_target = torch.nn.Sequential(
-            torch.nn.Linear(obs_dim, RND_LAYER_SIZE),
-            torch.nn.ReLU(),
-            torch.nn.Linear(RND_LAYER_SIZE, RND_LAYER_SIZE),
-            torch.nn.ReLU(),
-            torch.nn.Linear(RND_LAYER_SIZE, 1)
-        ).to(self.device)
-
-        self.rnd_predictor = torch.nn.Sequential(
-            torch.nn.Linear(obs_dim, RND_LAYER_SIZE),
-            torch.nn.ReLU(),
-            torch.nn.Linear(RND_LAYER_SIZE, RND_LAYER_SIZE),
-            torch.nn.ReLU(),
-            torch.nn.Linear(RND_LAYER_SIZE, 1)
-        ).to(self.device)
-
-        self.rnd_predictor_optimizer = torch.optim.Adam(self.rnd_predictor.parameters(), lr=rnd_alpha)
-        self.rnd_predictor_loss = torch.nn.MSELoss(reduction='mean')
+        self.rnd_reward = RNDreward(obs_dim, rnd_alpha, stats)
 
     @torch.enable_grad()
     def update(self) -> dict[str, tuple[int, float]]:
@@ -275,8 +250,7 @@ class DqnAgentRND(DqnAgent):
         states, actions, next_states, rewards, dones = torch.split(batch, split_size_or_sections=[self.obs_dim, 1, self.obs_dim, 2, 1], dim=1)
         actions = actions.squeeze(1)
         # Normalize aux reward
-        aux_rewards = rewards[:,1]
-        aux_rewards = (aux_rewards - self.rnd_reward_mean) / np.sqrt(self.rnd_reward_var)
+        aux_rewards = self.rnd_reward.normalize_and_clamp_reward(rewards[:,1])
         # Find total rewards
         rewards = rewards[:,0] + aux_rewards * self.reward_factor
         done_mask = 1 - dones
@@ -292,16 +266,11 @@ class DqnAgentRND(DqnAgent):
         loss = self.loss(Q_values, target_Q_values)
         loss.backward()
         self.optimizer.step()
+
         # Update RND network
-        self.rnd_predictor_optimizer.zero_grad()
-        norm_states = (next_states.to('cpu') - self.rnd_state_mean) / np.sqrt(self.rnd_state_var)
-        norm_states = torch.tensor(norm_states, device=self.device, dtype=torch.float32)
-        pred = self.rnd_predictor(norm_states)
-        with torch.no_grad():
-            target = self.rnd_target(norm_states)
-        rnd_loss = self.rnd_predictor_loss(pred, target)
-        rnd_loss.backward()
-        self.rnd_predictor_optimizer.step()
+        if self.stats.total_steps > self.RND_NORMALIZE_DELAY:
+            self.rnd_reward.update(next_states)
+            
         # Log the training data
         self._save_update_stats(Q_values, actions, loss)
         
@@ -313,35 +282,123 @@ class DqnAgentRND(DqnAgent):
 
     @torch.no_grad()
     def observe(self, state, action, next_state, reward, aux_reward, done=False):
-        # Update rnd state statistics
-        self.observe_rnd(next_state)
-        # Save action 
-        self.stats.record_action(action)
+
         # Overwriting aux reward
-        norm_state = (next_state - self.rnd_state_mean) / np.sqrt(self.rnd_state_var)
-        input = torch.tensor(norm_state, device=self.device, dtype=torch.float32)
-        pred = self.rnd_predictor(input)
-        target = self.rnd_target(input)
-        aux_reward = self.rnd_predictor_loss(pred, target).item()
-        # Update rnd_reward statistics
-        old_reward_mean = self.rnd_reward_mean
-        self.rnd_reward_mean = (self.rnd_reward_mean*self.rnd_update_reward_counter + reward) / (self.rnd_update_reward_counter + 1)
-        self.rnd_reward_var = (self.rnd_reward_var*self.rnd_update_reward_counter + (aux_reward - self.rnd_reward_mean)*(aux_reward - old_reward_mean)) / (self.rnd_update_reward_counter + 1)
-        self.rnd_update_reward_counter += 1
+        aux_reward = self.rnd_reward.observe(next_state)
+
+        self.stats.record_action(action)
         
         self.replay_buffer.add(state, action, next_state, reward, aux_reward, done)
+        
         # Save aux_reward to tensorboard
         # Use estimate of current normalization factors
-        aux_reward_norm = (aux_reward - self.rnd_reward_mean) / np.sqrt(self.rnd_reward_var)
-        aux_reward_norm = np.clip(aux_reward_norm, -5, 5) * self.reward_factor
+        aux_reward_norm = self.rnd_reward.normalize_and_clamp_reward(aux_reward) * self.reward_factor if self.stats.total_steps > 1 else aux_reward
         self.stats.record_reward(reward, aux_reward_norm)
+        
+class RNDreward():
+    def __init__(self, obs_dim:int, rnd_alpha:float=0.1, stats:StatsRecorder=None):
+        self.obs_dim = obs_dim
+        self.state_mean = np.zeros(obs_dim)
+        self.state_var = np.zeros(obs_dim)
+        self.reward_mean = 0
+        self.reward_var = 0
+        self.update_state_counter = 0
+        self.update_reward_counter = 0
+        self.update_counter = 0
 
-    def observe_rnd(self, next_state):
-        old_state_mean = self.rnd_state_mean.copy()
-        self.rnd_state_mean = (self.rnd_state_mean*self.rnd_update_state_counter + next_state) / (self.rnd_update_state_counter + 1)
-        self.rnd_state_var = (self.rnd_state_var*self.rnd_update_state_counter + (next_state - self.rnd_state_mean)*(next_state - old_state_mean)) / (self.rnd_update_state_counter + 1)
-        self.rnd_update_state_counter += 1
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+        self.stats = stats
+
+        # Initialize RND networks
+        LAYER_SIZE = 32
+        self.target = torch.nn.Sequential(
+            torch.nn.Linear(obs_dim, LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(LAYER_SIZE, LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(LAYER_SIZE, 1)
+        ).to(self.device)
+
+        self.predictor = torch.nn.Sequential(
+            torch.nn.Linear(obs_dim, LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(LAYER_SIZE, LAYER_SIZE),
+            torch.nn.ReLU(),
+            torch.nn.Linear(LAYER_SIZE, 1)
+        ).to(self.device)
+
+        self.predictor_optimizer = torch.optim.Adam(self.predictor.parameters(), lr=rnd_alpha)
+        self.predictor_loss = torch.nn.MSELoss(reduction='mean')
+
+    @torch.no_grad()
+    def observe(self, state):
+
+        # Update state statistics
+        old_state_mean = self.state_mean.copy()
+        self.state_mean = (self.state_mean*self.update_state_counter + state) / (self.update_state_counter + 1)
+        self.state_var = (self.state_var*self.update_state_counter + (state - self.state_mean)*(state - old_state_mean)) / (self.update_state_counter + 1)
+        self.update_state_counter += 1
+
+        # compute reward
+        norm_state = self.normalize_state(state) if self.update_state_counter > 1 else state
+        input = torch.tensor(norm_state, device=self.device, dtype=torch.float32)
+        pred = self.predictor(input)
+        target = self.target(input)
+        reward = self.predictor_loss(pred, target).item()
+        
+        # update reward statistics
+        old_reward_mean = self.reward_mean
+        self.reward_mean = (self.reward_mean*self.update_reward_counter + reward) / (self.update_reward_counter + 1)
+        self.reward_var = (self.reward_var*self.update_reward_counter + (reward - self.reward_mean)*(reward - old_reward_mean)) / (self.update_reward_counter + 1)
+        self.update_reward_counter += 1
+
+        # log to tensorboard
+        if self.update_reward_counter > 1:
+            if self.stats is not None:
+                self.stats.log(**{
+                    "RND/reward": (self.update_reward_counter, reward),
+                    "RND/reward_mean": (self.update_reward_counter, self.reward_mean),
+                    "RND/reward_var": (self.update_reward_counter, self.reward_var),
+                    "RND/reward_norm": (self.update_reward_counter, self.normalize_and_clamp_reward(reward) if self.update_reward_counter > 1 else reward),
+                    "RND/state_mean_0": (self.update_state_counter, self.state_mean[0]),
+                    "RND/state_var_0": (self.update_state_counter, self.state_var[0]),
+                    "RND/state_mean_1": (self.update_state_counter, self.state_mean[1]),
+                    "RND/state_var_1": (self.update_state_counter, self.state_var[1])
+                })
+
+        return reward
+
+
+    @torch.enable_grad()
+    def update(self, next_states:torch.Tensor):
+        # Update RND network
+        with torch.no_grad():
+            norm_states = self.normalize_state(next_states)
+            norm_states = torch.tensor(norm_states, device=self.device, dtype=torch.float32)
+            target = self.target(norm_states)
+        self.predictor_optimizer.zero_grad()
+        pred = self.predictor(norm_states)
+        loss = self.predictor_loss(pred, target)
+        loss.backward()
+        self.predictor_optimizer.step()
+
+        self.update_counter += 1
+
+        if self.stats is not None:
+            self.stats.log(**{
+                "RND/loss": (self.update_counter, loss.item()),
+            })
+
+    def normalize_reward(self, rewards):
+        return (rewards - self.reward_mean) / np.sqrt(self.reward_var)
+    
+    def normalize_state(self, state):
+        return (state - self.state_mean) / np.sqrt(self.state_var)
+
+    def normalize_and_clamp_reward(self, rewards):
+        rw = (rewards - self.reward_mean) / np.sqrt(self.reward_var)
+        return np.clip(rw, -5, 5)
 
 class DynaAgent():
     def __init__(self):
