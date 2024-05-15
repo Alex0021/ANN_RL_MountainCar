@@ -32,5 +32,17 @@
                 "logs/train/2024-05-09-06-22-18"
             ],
         },
+        {
+            "name": "Run RND training",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--train",
+                "--agent",
+                "dqn-rnd"
+            ],
+        },   
+
     ]
 }
