@@ -34,6 +34,24 @@ class ReplayBuffer():
             self.step_ptr = self.step_ptr + 1
 
         self.total_size = min(self.total_size + 1, self.MAX_EPISODES * self.MAX_STEPS)
+
+    def add(self, obs:np.ndarray, done:bool):
+        if self.step_ptr >= self.MAX_STEPS:
+            raise ValueError("maximum episode length exceeded.")
+
+        self.mapping[(self.episode_ptr, self.step_ptr)] = self.index
+        self.buffer[self.index] = obs
+        self.index = (self.index+1) % (self.MAX_EPISODES * self.MAX_STEPS)
+        
+        if done:
+            self.episode_ptr = (self.episode_ptr + 1) % self.MAX_EPISODES
+            self.step_ptr = 0
+        else:
+            self.step_ptr = self.step_ptr + 1
+
+        self.total_size = min(self.total_size + 1, self.MAX_EPISODES * self.MAX_STEPS)
+
+        
             
 
     def sample(self, batch_size:int):

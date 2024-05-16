@@ -25,7 +25,6 @@ class RandomAgent():
     def update(self):
         pass
 
-
 class DqnAgent():
 
     def __init__(self, num_actions:int, 
@@ -211,6 +210,7 @@ class DqnAgent():
     def get_q_values(self, states):
         states = torch.tensor(states, dtype=torch.float32, device=self.device)
         return self.q_network(states).to("cpu").numpy()
+    
 class DqnAgentRND(DqnAgent):
     def __init__(self, num_actions:int, 
                  obs_dim:int, 
@@ -220,7 +220,7 @@ class DqnAgentRND(DqnAgent):
                  MAX_STEPS:int=200, 
                  MAX_EPISODES:int=1, 
                  BATCH_SIZE:int=64,
-                 reward_factor:float=2.0,
+                 reward_factor:float|Callable=2.0,
                  RND_NORMALIZE_DELAY:int=5,
                  rnd_alpha:float=0.1,
                  stats:StatsRecorder=None,
@@ -239,6 +239,11 @@ class DqnAgentRND(DqnAgent):
 
         self.rnd_reward = RNDreward(obs_dim, rnd_alpha, stats)
 
+        if not isinstance(reward_factor, types.FunctionType):
+            reward_factor = lambda _: reward_factor
+        self.reward_factor = reward_factor
+
+
     @torch.enable_grad()
     def update(self) -> dict[str, tuple[int, float]]:
         if self.replay_buffer.total_size < self.BATCH_SIZE or self.stats.total_steps < self.STEPS_DELAY:
@@ -252,7 +257,7 @@ class DqnAgentRND(DqnAgent):
         # Normalize aux reward
         aux_rewards = self.rnd_reward.normalize_and_clamp_reward(rewards[:,1])
         # Find total rewards
-        rewards = rewards[:,0] + aux_rewards * self.reward_factor
+        rewards = rewards[:,0] + aux_rewards * self.reward_factor(self.update_counter)
         done_mask = 1 - dones
         with torch.no_grad():
             if self.use_target_network:
@@ -280,6 +285,11 @@ class DqnAgentRND(DqnAgent):
         if self.use_target_network and self.update_counter % self.target_network_update_freq == 0:
             self.target_q_network.load_state_dict(self.q_network.state_dict().copy())
 
+        if self.stats is not None:
+            self.stats.log(**{
+                "training/reward_factor": (self.update_counter, self.reward_factor(self.update_counter)),
+            })
+
     @torch.no_grad()
     def observe(self, state, action, next_state, reward, aux_reward, done=False):
 
@@ -292,7 +302,7 @@ class DqnAgentRND(DqnAgent):
         
         # Save aux_reward to tensorboard
         # Use estimate of current normalization factors
-        aux_reward_norm = self.rnd_reward.normalize_and_clamp_reward(aux_reward) * self.reward_factor if self.stats.total_steps > 1 else aux_reward
+        aux_reward_norm = self.rnd_reward.normalize_and_clamp_reward(aux_reward) * self.reward_factor(self.update_counter) if self.stats.total_steps > 1 else aux_reward
         self.stats.record_reward(reward, aux_reward_norm)
         
 class RNDreward():
@@ -401,14 +411,82 @@ class RNDreward():
         return np.clip(rw, -5, 5)
 
 class DynaAgent():
-    def __init__(self):
-        pass
+    def __init__(self,
+                 num_actions:int, 
+                 obs_dim:int, 
+                 discount:float=0.99, 
+                 epsilon:float|Callable=0.1, 
+                 MAX_STEPS:int=200,
+                 MAX_EPISODES:int=1,
+                 k:int=10,
+                 model_folder:str="models",
+                 stats:StatsRecorder=None,
+                 n_bins:int=(100, 100),
+                 action_ranges:list[list]=[[-1.2, 0.6], [-0.07, 0.07]]):
+        
+        self.num_actions = num_actions
+        self.obs_dim = obs_dim + 1 # state + action
+        self.discount = discount
+        self.epsilon = epsilon
+        self.replay_buffer = ReplayBuffer(self.obs_dim, MAX_STEPS, MAX_EPISODES)
+        self.k = k
+        self.stats = stats
+        self.model_folder = model_folder
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.action_ranges = np.diff(np.array(action_ranges), axis=1)
+        self.actions_min = np.array(action_ranges)[:,0]
+        self.bin_sizes = np.divide(self.action_ranges, np.array(n_bins+1))
+        self.n_bins = np.array(n_bins)
 
-    def observe(self, state, action, next_state, reward):
-        pass
+        n_states = np.prod(n_bins+1)
+        
+        self.Q_table = np.zeros(n_states, num_actions)
+        self.R_table = np.zeros(n_states, num_actions)
+        self.P_table = np.zeros(n_states, num_actions, n_states)
+        self.bin_count_table = np.zeros(n_states, num_actions)
+
+    def state_to_idx_map(self, state):
+        idx = np.floor(np.divide(np.array(state)-self.actions_min, self.bin_sizes)) 
+        idx = np.clip(idx, [0,0], self.n_bins)
+        idx = idx[0] * self.bin_sizes[0] + idx[1]
+        return int(idx)
+    
+    def Q(self, state, action):
+        idx = self.state_to_index_map(state)
+        return self.Q_table[idx, int(action)]
+    
+    def R(self, state, action):
+        idx = self.state_to_index_map(state)
+        return self.R_table[idx, int(action)]
+    
+    def P(self, state, action, next_state):
+        idx0 = self.state_to_index_map(state)
+        idx1 = self.state_to_index_map(next_state)
+        return self.P_table[idx0, int(action), idx1]
+    
+    def observe(self, state, action, next_state, reward, aux_reward, done=False):
+        self.replay_buffer.add(np.concatenate([np.array(state), action]), done)
+        state_idx = self.state_to_index_map(state)
+        next_state_idx = self.state_to_index_map(next_state)
+        self.P_table[state_idx, action, next_state_idx] += 1
+
+        self.R_table[state_idx, action] *= self.bin_count_table[state_idx, action]
+        self.R_table[state_idx, action] += reward
+        self.bin_count_table[state_idx, action] *= 1
+        self.R_table[state_idx, action] /= self.bin_count_table[state_idx, action]
+
+        self.update_q_values(state, action)
+
+    def update_q_values(self, state, action):
+        idx = self.state_to_index_map(state) # support broadcasting here
+        idx = np.concatenate([np.array(idx), np.array(action)])
+        self.Q_table[idx] = self.R_table[idx] + self.discount * np.sum(self.P_table[idx, :]/self.bin_count_table[idx] * np.max(self.Q_table, axis=1)) 
 
     def select_action(self, state):
         pass
 
     def update(self):
-        pass
+        # random k samples
+        k_samples = ...
+        states, actions = ...
+        self.update_q_values(states, actions)
