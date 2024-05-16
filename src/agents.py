@@ -418,6 +418,7 @@ class DynaAgent():
                  epsilon:float|Callable=0.1, 
                  MAX_STEPS:int=200,
                  MAX_EPISODES:int=1,
+                 eval:bool=False,
                  k:int=10,
                  model_folder:str="models",
                  stats:StatsRecorder=None,
@@ -425,68 +426,90 @@ class DynaAgent():
                  action_ranges:list[list]=[[-1.2, 0.6], [-0.07, 0.07]]):
         
         self.num_actions = num_actions
-        self.obs_dim = obs_dim + 1 # state + action
+        self.dim = obs_dim + 2 # state + action
+        self.obs_dim = obs_dim
         self.discount = discount
         self.epsilon = epsilon
-        self.replay_buffer = ReplayBuffer(self.obs_dim, MAX_STEPS, MAX_EPISODES)
+        self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
         self.k = k
         self.stats = stats
         self.model_folder = model_folder
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.action_ranges = np.diff(np.array(action_ranges), axis=1)
+        self.action_ranges = np.diff(np.array(action_ranges), axis=1).flatten()
         self.actions_min = np.array(action_ranges)[:,0]
-        self.bin_sizes = np.divide(self.action_ranges, np.array(n_bins+1))
         self.n_bins = np.array(n_bins)
-
-        n_states = np.prod(n_bins+1)
+        self.bin_sizes = np.divide(self.action_ranges, self.n_bins+1)
+        n_states = np.prod(self.n_bins+1)
         
-        self.Q_table = np.zeros(n_states, num_actions)
-        self.R_table = np.zeros(n_states, num_actions)
-        self.P_table = np.zeros(n_states, num_actions, n_states)
-        self.bin_count_table = np.zeros(n_states, num_actions)
+        self.Q_table = np.zeros((n_states, num_actions))
+        self.R_table = np.zeros((n_states, num_actions))
+        self.P_table = np.zeros((n_states, num_actions, n_states))
+        self.bin_count_table = np.zeros((n_states, num_actions))
+
+        # Check for epsilon function
+        if eval:
+            epsilon = 0
+        if not isinstance(epsilon, types.FunctionType):
+            self.get_epsilon_value = lambda _: epsilon
+        else:
+            self.get_epsilon_value = epsilon
 
     def state_to_idx_map(self, state):
-        idx = np.floor(np.divide(np.array(state)-self.actions_min, self.bin_sizes)) 
-        idx = np.clip(idx, [0,0], self.n_bins)
-        idx = idx[0] * self.bin_sizes[0] + idx[1]
-        return int(idx)
+        if state.ndim == 1:
+            state = state.reshape(1, -1)
+        idx = np.floor(np.divide(state-self.actions_min, self.bin_sizes)) 
+        idx = np.clip(idx, 0, self.n_bins)
+        idx = idx[:,0]*self.bin_sizes[0] + idx[:,1]
+        return idx.astype(int)
     
     def Q(self, state, action):
-        idx = self.state_to_index_map(state)
+        idx = self.state_to_idx_map(state)
         return self.Q_table[idx, int(action)]
     
     def R(self, state, action):
-        idx = self.state_to_index_map(state)
+        idx = self.state_to_idx_map(state)
         return self.R_table[idx, int(action)]
     
     def P(self, state, action, next_state):
-        idx0 = self.state_to_index_map(state)
-        idx1 = self.state_to_index_map(next_state)
+        idx0 = self.state_to_idx_map(state)
+        idx1 = self.state_to_idx_map(next_state)
         return self.P_table[idx0, int(action), idx1]
     
     def observe(self, state, action, next_state, reward, aux_reward, done=False):
-        self.replay_buffer.add(np.concatenate([np.array(state), action]), done)
-        state_idx = self.state_to_index_map(state)
-        next_state_idx = self.state_to_index_map(next_state)
+        self.replay_buffer.add(np.concatenate([state, [action, done]]), done)
+        state_idx = self.state_to_idx_map(state)
+        next_state_idx = self.state_to_idx_map(next_state)
         self.P_table[state_idx, action, next_state_idx] += 1
 
+        # Running mean of rewards
         self.R_table[state_idx, action] *= self.bin_count_table[state_idx, action]
         self.R_table[state_idx, action] += reward
-        self.bin_count_table[state_idx, action] *= 1
+        self.bin_count_table[state_idx, action] += 1
         self.R_table[state_idx, action] /= self.bin_count_table[state_idx, action]
 
-        self.update_q_values(state, action)
+        self.update_q_values(state, np.array([action]), np.array([done]))
 
-    def update_q_values(self, state, action):
-        idx = self.state_to_index_map(state) # support broadcasting here
-        idx = np.concatenate([np.array(idx), np.array(action)])
-        self.Q_table[idx] = self.R_table[idx] + self.discount * np.sum(self.P_table[idx, :]/self.bin_count_table[idx] * np.max(self.Q_table, axis=1)) 
+    def update_q_values(self, state, action, done):
+        idx = self.state_to_idx_map(state).flatten()
+        idx_a = action.flatten().astype(int)
+        done_mask = 1 - done
+        target = self.discount * np.sum(self.P_table[idx, idx_a, :]/self.bin_count_table[idx, idx_a, np.newaxis] * np.max(self.Q_table, axis=1), axis=1) * done_mask.flatten()
+        self.Q_table[idx, idx_a] = self.R_table[idx, idx_a] + target
 
-    def select_action(self, state):
-        pass
+    def select_action(self, state, iter:int=0):
+        e = self.get_epsilon_value(iter)
+        if self.stats is not None:
+            self.stats.record_epsilon(e)
+        if np.random.rand() < e:
+            return np.random.randint(0, self.num_actions)
+        else:
+            idx = self.state_to_idx_map(state)
+            return np.argmax(self.Q_table[idx])
 
     def update(self):
+        if self.replay_buffer.total_size < self.k:
+            return
         # random k samples
-        k_samples = ...
-        states, actions = ...
-        self.update_q_values(states, actions)
+        k_samples = self.replay_buffer.sample(self.k)
+        states, actions, dones,_ = np.hsplit(k_samples, [self.obs_dim, self.obs_dim+1, self.obs_dim+2])
+        self.update_q_values(states, actions, dones)

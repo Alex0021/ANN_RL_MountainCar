@@ -1,6 +1,6 @@
 import gymnasium as gym
 import numpy as np
-from src.agents import RandomAgent, DqnAgent, DqnAgentRND
+from src.agents import RandomAgent, DqnAgent, DqnAgentRND, DynaAgent
 from src.stats import StatsRecorder
 import matplotlib.pyplot as plt
 import tqdm
@@ -331,6 +331,18 @@ if __name__ == "__main__":
                         stats=stats,
                         rnd_alpha=0.01,
                         reward_factor=reward_factor
+        )
+    elif args[agent_arg_idx+1] == "dyna":
+        agent = DynaAgent(env.action_space.n, 
+                        env.observation_space.shape[0], 
+                        discount=gamma, 
+                        epsilon=epsilon, 
+                        MAX_STEPS=MAX_STEPS, 
+                        MAX_EPISODES=MAX_EPISODES, 
+                        eval=eval_mode,
+                        stats=stats,
+                        n_bins=(100,100),
+                        k=BATCH_SIZE
         )
     else:
         raise ValueError("Invalid agent type")
