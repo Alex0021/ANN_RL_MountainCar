@@ -266,6 +266,7 @@ if __name__ == "__main__":
     # epsilon = lambda iter: max(np.exp(-(iter*5/total_episodes)), 0.07)
     epsilon = 0
     alpha = 1e-3
+    reward_factor = lambda iter: np.exp(-(iter*10/(total_episodes*MAX_STEPS)))
 
     if len(args) < 3:
         raise ValueError("Needs at least 3 arguments: --agent [random|dqn|dqn-rnd] --train|--eval [--last|--model <model_number>]")
@@ -327,7 +328,9 @@ if __name__ == "__main__":
                         BATCH_SIZE=BATCH_SIZE, 
                         use_target_network=True,
                         eval=eval_mode,
-                        stats=stats
+                        stats=stats,
+                        rnd_alpha=0.01,
+                        reward_factor=reward_factor
         )
     else:
         raise ValueError("Invalid agent type")
