@@ -171,7 +171,7 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent):
         total_episodes += 1
         stats.stop_recording()
 
-def evaluate_agent(agent, path:str, MAX_EPISODES:int=1_000_000):
+def evaluate_agent(agent_type:str, path:str, MAX_EPISODES:int=1_000_000):
     stats = StatsRecorder(1_000_000, 
                         200, 
                         1,
@@ -179,7 +179,18 @@ def evaluate_agent(agent, path:str, MAX_EPISODES:int=1_000_000):
                         log_dir="logs/eval")
     env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode="human")
     total_episodes = 0
-    agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+    match agent_type:
+        case DqnAgent.__class__.__name__:
+            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+            path.join(path,".pth")
+        case DqnAgentRND.__class__.__name__:
+            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval=True)
+            path.join(path,".pth")
+        case DynaAgent.__class__.__name__:
+            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+            path.join(path,".npy")
+        case RandomAgent.__class__.__name__:
+            agent = RandomAgent(env.action_space.n, env.observation_space.shape[0])
     print(f'Loading model: "{path}"')
     agent.load(path)
     while total_episodes < MAX_EPISODES:
@@ -202,7 +213,7 @@ def evaluate_agent(agent, path:str, MAX_EPISODES:int=1_000_000):
         stats.stop_recording()
         total_episodes += 1
 
-def evaluate_last_model(MAX_EPISODES:int=1_000_000):
+def evaluate_last_model(agent_type:str, MAX_EPISODES:int=1_000_000):
     folder = "models"
     
     stats = StatsRecorder(1_000_000, 
@@ -214,7 +225,15 @@ def evaluate_last_model(MAX_EPISODES:int=1_000_000):
     # env = gym.make('MountainCar-v0', render_mode="human")
     env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode="human")
     total_episodes = 0
-    agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+    match agent_type:
+        case "dqn":
+            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+        case "dqn-rnd":
+            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval=True)
+        case "dyna":
+            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+        case "random":
+            agent = RandomAgent(env.action_space.n, env.observation_space.shape[0])
     while total_episodes < MAX_EPISODES:
         files = os.listdir(folder)
         files = [f for f in files if f.startswith(agent.__class__.__name__)]
@@ -282,15 +301,20 @@ if __name__ == "__main__":
     # Folder specified for eval
     if eval_mode:
         if args[1] == "--last":
-            evaluate_last_model()
+            if "--agent" not in args:
+                raise ValueError("No agent type specified")
+            evaluate_last_model(agent_type=args[args.index("--agent")+1])
         elif args[1] == "--model":
             if len(args) > 2:
-                path = os.path.join("models", f"{args[2]}.pth")
-                evaluate_agent(path=path)
+                agent_type = args[2].split("_")[0]
+                path = os.path.join("models", f"{args[2]}")
+                evaluate_agent(agent_type, path=path)
             else:
                 raise ValueError("No model number provided")
         else:
-            evaluate_last_model()
+            if "--agent" not in args:
+                raise ValueError("No agent type specified")
+            evaluate_last_model(agent_type=args[args.index("--agent")+1])
         sys.exit(0)
     
     

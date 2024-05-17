@@ -419,6 +419,7 @@ class DynaAgent():
                  MAX_STEPS:int=200,
                  MAX_EPISODES:int=1,
                  eval:bool=False,
+                 export_frequency:int=1_000,
                  k:int=10,
                  model_folder:str="models",
                  stats:StatsRecorder=None,
@@ -440,6 +441,8 @@ class DynaAgent():
         self.n_bins = np.array(n_bins)
         self.bin_sizes = np.divide(self.action_ranges, self.n_bins+1)
         n_states = np.prod(self.n_bins+1)
+        self.update_counter = 0
+        self.export_frequency = export_frequency
         
         self.Q_table = np.zeros((n_states, num_actions))
         self.R_table = np.zeros((n_states, num_actions))
@@ -476,6 +479,10 @@ class DynaAgent():
         return self.P_table[idx0, int(action), idx1]
     
     def observe(self, state, action, next_state, reward, aux_reward, done=False):
+        # Save reward and action
+        self.stats.record_action(action)
+        self.stats.record_reward(reward, aux_reward)
+
         self.replay_buffer.add(np.concatenate([state, [action, done]]), done)
         state_idx = self.state_to_idx_map(state)
         next_state_idx = self.state_to_idx_map(next_state)
@@ -513,3 +520,15 @@ class DynaAgent():
         k_samples = self.replay_buffer.sample(self.k)
         states, actions, dones,_ = np.hsplit(k_samples, [self.obs_dim, self.obs_dim+1, self.obs_dim+2])
         self.update_q_values(states, actions, dones)
+
+        self.update_counter += 1
+        if self.update_counter % self.export_frequency == 0:
+            self.save(model_name=self.__class__.__name__)
+
+    def save(self, model_name:str='agentXXX'):
+        name = f"{model_name}_model_{self.update_counter}.npy"
+        path = self.model_folder + "/" + name
+        np.save(path, self.Q_table)
+
+    def load(self, path):
+        self.Q_table = np.load(path)
