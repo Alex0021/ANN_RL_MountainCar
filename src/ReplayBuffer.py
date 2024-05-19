@@ -17,12 +17,14 @@ class ReplayBuffer():
         self.step_ptr = 0
         self.index = 0
         self.total_size = 0
+        self.unique_actions = set()
 
 
     def add(self, state:np.ndarray, action:int, next_state:np.ndarray, reward:float, aux_reward:float, done:bool):
         if self.step_ptr >= self.MAX_STEPS:
             raise ValueError("maximum episode length exceeded.")
 
+        self.unique_actions.add(action)
         self.mapping[(self.episode_ptr, self.step_ptr)] = self.index
         self.buffer[self.index] = np.concatenate([state, np.array([action]), next_state, [reward, aux_reward], np.array([done])])
         self.index = (self.index+1) % (self.MAX_EPISODES * self.MAX_STEPS)
@@ -39,6 +41,7 @@ class ReplayBuffer():
         if self.step_ptr >= self.MAX_STEPS:
             raise ValueError("maximum episode length exceeded.")
 
+        self.unique_actions.add(int(obs[2]))
         self.mapping[(self.episode_ptr, self.step_ptr)] = self.index
         self.buffer[self.index] = obs
         self.index = (self.index+1) % (self.MAX_EPISODES * self.MAX_STEPS)
@@ -51,15 +54,15 @@ class ReplayBuffer():
 
         self.total_size = min(self.total_size + 1, self.MAX_EPISODES * self.MAX_STEPS)
 
-        
-            
-
     def sample(self, batch_size:int):
         if self.total_size < batch_size:
             raise ValueError("Not enough samples to sample from.")
         indices = np.random.randint(0, self.total_size, batch_size)
         samples = self.buffer[indices]
         return samples
+
+    def sample_past_actions(self, batch_size:int):
+        return np.random.choice(list(self.unique_actions), batch_size, replace=True)
 
     def __len__(self):
         return self.size
