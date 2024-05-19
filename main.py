@@ -231,7 +231,7 @@ def evaluate_last_model(agent_type:str, MAX_EPISODES:int=1_000_000):
         case "dqn-rnd":
             agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval=True)
         case "dyna":
-            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], n_bins=(72,28), eval=True)
         case "random":
             agent = RandomAgent(env.action_space.n, env.observation_space.shape[0])
     while total_episodes < MAX_EPISODES:
@@ -272,7 +272,7 @@ if __name__ == "__main__":
 
     # Training parameters
     total_episodes = 3_000
-    MAX_EPISODES = 100
+    MAX_EPISODES = 500
 
     # agent parameters
     obs_dim = env.observation_space.shape[0]
@@ -281,9 +281,9 @@ if __name__ == "__main__":
     MAX_STEPS = 200
     BATCH_SIZE = 64
     gamma = 0.99
-    # epsilon = lambda iter: max(0.9*np.exp(-iter/(total_episodes/10)), 0.05)
+    epsilon = lambda iter: max(0.1*np.exp(-iter/(total_episodes/50)), 0.01)
     # epsilon = lambda iter: max(np.exp(-(iter*5/total_episodes)), 0.07)
-    epsilon = 0
+    #epsilon = 0.1
     alpha = 1e-3
     reward_factor = lambda iter: np.exp(-(iter*10/(total_episodes*MAX_STEPS)))
 
@@ -365,7 +365,8 @@ if __name__ == "__main__":
                         MAX_EPISODES=MAX_EPISODES, 
                         eval=eval_mode,
                         stats=stats,
-                        n_bins=(100,100),
+                        lr=0.2,
+                        n_bins=(72,28),
                         k=BATCH_SIZE
         )
     else:

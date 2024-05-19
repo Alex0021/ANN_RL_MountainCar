@@ -465,6 +465,14 @@ class DynaAgent():
         else:
             self.get_epsilon_value = epsilon
 
+        # clear models folder
+        if not eval:
+            if os.path.exists(model_folder):
+                print("Clearing models folder...")
+                self.clear_models(model_name=self.__class__.__name__)
+            else:
+                os.makedirs(model_folder)
+
     def state_to_idx_map(self, state):
         if state.ndim == 1:
             state = state.reshape(1, -1)
@@ -489,7 +497,7 @@ class DynaAgent():
     def observe(self, state, action, next_state, reward, aux_reward, done=False):
         # Save reward and action
         self.stats.record_action(action)
-        self.stats.record_reward(reward, aux_reward)
+        self.stats.record_reward(reward, 0)
 
         self.replay_buffer.add(np.concatenate([state, [action, done]]), done)
         state_idx = self.state_to_idx_map(state)
@@ -526,8 +534,8 @@ class DynaAgent():
             return
         # random k samples
         k_samples = self.replay_buffer.sample(self.k)
-        states, _, dones,_ = np.hsplit(k_samples, [self.obs_dim, self.obs_dim+1, self.obs_dim+2])
-        actions = self.replay_buffer.sample_past_actions(self.k)
+        states, actions, dones,_ = np.hsplit(k_samples, [self.obs_dim, self.obs_dim+1, self.obs_dim+2])
+        #actions = self.replay_buffer.sample_past_actions(self.k)
         self.update_q_values(states, actions, dones)
 
         self.update_counter += 1
@@ -559,3 +567,8 @@ class DynaAgent():
     def get_q_values(self, states):
         idx = self.state_to_idx_map(np.array(states)).flatten()
         return self.Q_table[idx,:]
+
+    def clear_models(self, model_name:str='agentXXX'):
+        for file in os.listdir(self.model_folder):
+            if file.startswith(model_name):
+                os.remove(os.path.join(self.model_folder, file))
