@@ -415,7 +415,8 @@ class DynaAgent():
                  num_actions:int, 
                  obs_dim:int, 
                  discount:float=0.99, 
-                 epsilon:float|Callable=0.1, 
+                 epsilon:float|Callable=0.1,
+                 lr:float=0.1,
                  MAX_STEPS:int=200,
                  MAX_EPISODES:int=1,
                  eval:bool=False,
@@ -431,6 +432,7 @@ class DynaAgent():
         self.obs_dim = obs_dim
         self.discount = discount
         self.epsilon = epsilon
+        self.lr = lr
         self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
         self.k = k
         self.stats = stats
@@ -448,6 +450,12 @@ class DynaAgent():
         self.R_table = np.zeros((n_states, num_actions))
         self.P_table = np.zeros((n_states, num_actions, n_states))
         self.bin_count_table = np.zeros((n_states, num_actions))
+
+        # Stats
+        self.Q_avg = 0
+        self.Q_head_right_avg = 0
+        self.Q_head_stay_avg = 0
+        self.Q_head_left_avg = 0
 
         # Check for epsilon function
         if eval:
@@ -501,7 +509,7 @@ class DynaAgent():
         idx_a = action.flatten().astype(int)
         done_mask = 1 - done
         target = self.discount * np.sum(self.P_table[idx, idx_a, :]/self.bin_count_table[idx, idx_a, np.newaxis] * np.max(self.Q_table, axis=1), axis=1) * done_mask.flatten()
-        self.Q_table[idx, idx_a] = self.R_table[idx, idx_a] + target
+        self.Q_table[idx, idx_a] += self.lr * (self.R_table[idx, idx_a] + target - self.Q_table[idx, idx_a])
 
     def select_action(self, state, iter:int=0):
         e = self.get_epsilon_value(iter)
@@ -518,12 +526,27 @@ class DynaAgent():
             return
         # random k samples
         k_samples = self.replay_buffer.sample(self.k)
-        states, actions, dones,_ = np.hsplit(k_samples, [self.obs_dim, self.obs_dim+1, self.obs_dim+2])
+        states, _, dones,_ = np.hsplit(k_samples, [self.obs_dim, self.obs_dim+1, self.obs_dim+2])
+        actions = self.replay_buffer.sample_past_actions(self.k)
         self.update_q_values(states, actions, dones)
 
         self.update_counter += 1
+        # Update stats
+        self.Q_avg = np.mean(self.Q_table)
+        self.Q_head_right_avg = np.mean(self.Q_table[:,2])
+        self.Q_head_stay_avg = np.mean(self.Q_table[:,1])
+        self.Q_head_left_avg = np.mean(self.Q_table[:,0])
+        if self.stats is not None:
+            self.stats.log(**{
+                "training/mean_Q": (self.update_counter, self.Q_avg),
+                "training/Q_head_right": (self.update_counter, self.Q_head_right_avg),
+                "training/Q_head_stay": (self.update_counter, self.Q_head_stay_avg),
+                "training/Q_head_left": (self.update_counter, self.Q_head_left_avg),
+            })
+
         if self.update_counter % self.export_frequency == 0:
             self.save(model_name=self.__class__.__name__)
+
 
     def save(self, model_name:str='agentXXX'):
         name = f"{model_name}_model_{self.update_counter}.npy"
@@ -532,3 +555,7 @@ class DynaAgent():
 
     def load(self, path):
         self.Q_table = np.load(path)
+
+    def get_q_values(self, states):
+        idx = self.state_to_idx_map(np.array(states)).flatten()
+        return self.Q_table[idx,:]
