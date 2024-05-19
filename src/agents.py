@@ -470,7 +470,7 @@ class DynaAgent():
             state = state.reshape(1, -1)
         idx = np.floor(np.divide(state-self.actions_min, self.bin_sizes)) 
         idx = np.clip(idx, 0, self.n_bins)
-        idx = idx[:,0]*self.bin_sizes[0] + idx[:,1]
+        idx = idx[:,0]*self.n_bins[1] + idx[:,1]
         return idx.astype(int)
     
     def Q(self, state, action):
