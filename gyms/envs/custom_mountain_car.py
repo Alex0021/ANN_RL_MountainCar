@@ -5,17 +5,18 @@ from matplotlib import pyplot as plt
 
 class CustomMountainCar(MountainCarEnv):
 
-    def __init__(self, **kwargs):
+    def __init__(self, reward_type="normed_speed", **kwargs):
         super(CustomMountainCar, self).__init__(**kwargs)
         self.max_r = -np.inf
         self.max_l = -np.inf
         self.middle_x = -np.pi/6
         self.fig = plt.figure(num=1)
+        self.reward_type = reward_type
 
-    def step(self, action, reward_type="normed_speed"):
+    def step(self, action):
         state = self.state
         next_state, reward, terminated, truncated, _ = super(CustomMountainCar, self).step(action)
-        if reward_type == None:
+        if self.reward_type == None:
             return next_state, reward, terminated, truncated, {"env_reward": reward}
         # reward = 1 if reward 
         # n_height = self.normed_height(state[0])

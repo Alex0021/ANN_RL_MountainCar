@@ -435,7 +435,7 @@ class RNDreward():
         rw = (rewards - self.reward_mean) / np.sqrt(self.reward_var)
         return np.clip(rw, -5, 5)
 
-class DynaAgent():
+class DynaAgent(Agent):
     def __init__(self,
                  num_actions:int, 
                  obs_dim:int, 
@@ -505,7 +505,8 @@ class DynaAgent():
     def update_q_values(self, state, action):
         idx = self.state_to_index_map(state) # support broadcasting here
         idx = np.concatenate([np.array(idx), np.array(action)])
-        self.Q_table[idx] = self.R_table[idx] + self.discount * np.sum(self.P_table[idx, :]/self.bin_count_table[idx] * np.max(self.Q_table, axis=1)) 
+        Q_value_step = self.discount * np.sum(self.P_table[idx, :]/self.bin_count_table[idx] * np.max(self.Q_table, axis=1))
+        self.Q_table[idx] = self.R_table[idx] + Q_value_step
 
     def select_action(self, state):
         pass

@@ -41,6 +41,8 @@ class StatsRecorder:
         self.steps_num = steps_num
         self.bulk_size = bulk_size
         self.episode_rewards = np.zeros((episode_num, steps_num), dtype=np.float32)
+        self.env_rewards = np.zeros((episode_num, steps_num), dtype=np.float32)
+        self.aux_rewards = np.zeros((episode_num, steps_num), dtype=np.float32)
         self.episode_length = np.zeros((episode_num), dtype=np.int32)
         self.episode_index = 0
         self.step_index = 0
@@ -73,21 +75,31 @@ class StatsRecorder:
             "episodes/episode_actions": (self.episode_index, {"left":self.actions_count[0],
                                                                "stay":self.actions_count[1],
                                                                "right":self.actions_count[2]}),
-            "episodes/episode_epsilon": (self.episode_index, self.current_epsilon)
+            "episodes/episode_epsilon": (self.episode_index, self.current_epsilon),
+            "episodes/episode_env_reward": (self.episode_index, np.sum(self.env_rewards[self.episode_index])),
+            "episodes/episode_aux_reward": (self.episode_index, np.sum(self.aux_rewards[self.episode_index]))
         })
         self.writer.flush()
         self.episode_index += 1
         self.actions_count = np.zeros_like(self.actions_count)
 
+
     def reset(self):
         self.episode_rewards = np.zeros((self.episode_num, self.steps_num), dtype=np.float32)
+        self.env_rewards = np.zeros((self.episode_num, self.steps_num), dtype=np.float32)
+        self.aux_rewards = np.zeros((self.episode_num, self.steps_num), dtype=np.float32)
+        
         self.episode_length = np.zeros((self.episode_num), dtype=np.int32)
+
         self.episode_index = 0
         self.step_index = 0
 
     def record_reward(self, reward ,aux_reward):
         assert self.step_index < self.steps_num, "Number of steps exceeded! Maybe call to stop recording is missing"
         self.episode_rewards[self.episode_index, self.step_index] = reward+aux_reward
+        self.aux_rewards[self.episode_index, self.step_index] = aux_reward
+        self.env_rewards[self.episode_index, self.step_index] = reward
+
         self.step_index += 1
         self.total_steps += 1
         self.log(**{

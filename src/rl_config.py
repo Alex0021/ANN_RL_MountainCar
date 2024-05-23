@@ -9,16 +9,17 @@ class RLConfig():
             setattr(self, key, value)
         # convert keys to class members
         for key, value in config.items():
+            value = self.parse_value(value)
             setattr(self, key, value)
 
         self.config = {**default_config, **config}
 
-        if not isinstance(self.epsilon, float):
+        if isinstance(self.epsilon, str):
             self.epsilon_str = self.epsilon
             self.epsilon = lambda iter: eval(self.epsilon_str, {**self.config, "np": np }, {"iter":iter})
 
         # same for reward factor
-        if not isinstance(self.reward_factor, float):
+        if isinstance(self.reward_factor, str):
             self.reward_factor_str = self.reward_factor
             self.reward_factor = lambda iter: eval(self.reward_factor_str, {**self.config, "np": np }, {"iter":iter})
 

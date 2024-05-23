@@ -164,12 +164,10 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, config:RLConfig):
         stats.start_recording()
         while not done:
             action = agent.select_action(state, i)
-            next_state, tot_reward, terminated, truncated, infos = env.step(int(action), reward_type=config.heuristic_reward_type)
+            next_state, tot_reward, terminated, truncated, infos = env.step(int(action))
             aux_reward = infos.get("aux_reward", 0)
             reward = infos.get("env_reward", 0)
             done  = terminated or truncated
-            if not config.use_heuristic_reward:
-                aux_reward = 0
             agent.observe(state, action, next_state, reward, aux_reward, done)
             agent.update()
             state = next_state
@@ -278,7 +276,10 @@ if __name__ == "__main__":
     config = RLConfig(config)
 
     # env = gym.make('MountainCar-v0')
-    env = gym.make(config.env)
+    if "CustomMountainCar-v0" in config.env:
+        env = gym.make(config.env, reward_type=config.heuristic_reward_type)
+    else:
+        env = gym.make(config.env)
 
     print(f"obs dim: {env.observation_space.shape[0]}, action dim: {env.action_space.n}")
     BULK_SIZE = 1
