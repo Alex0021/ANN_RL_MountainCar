@@ -12,9 +12,11 @@ class CustomMountainCar(MountainCarEnv):
         self.middle_x = -np.pi/6
         self.fig = plt.figure(num=1)
 
-    def step(self, action):
+    def step(self, action, reward_type="normed_speed"):
         state = self.state
         next_state, reward, terminated, truncated, _ = super(CustomMountainCar, self).step(action)
+        if reward_type == None:
+            return next_state, reward, terminated, truncated, {"env_reward": reward}
         # reward = 1 if reward 
         # n_height = self.normed_height(state[0])
         # pos_sign = 1 if state[0] > self.middle_x else -1
