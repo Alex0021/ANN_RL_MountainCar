@@ -1,36 +1,25 @@
 import os, sys
-from tensorboard.backend.event_processing.event_file_loader import RawEventFileLoader
-from tensorboard.compat.proto import event_pb2
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+import yaml
+import pandas as pd
 
+from src.rl_config import RLConfig
+from src.data_utils import extract_data_from_event, extract_data_from_tb_file
 
-def extract_data_from_event(e):
-    data_name = e.summary.value[0].tag.split('/')[-1]
-    value = e.summary.value[0].simple_value
-    return data_name, int(e.step), float(value)
-
-def extract_data_from_tb_file(path):
-    loader = RawEventFileLoader(path)
-    data_dict = {}
-    info = "Reading data"
-    start_time = time.time()
-    for raw_event in loader.Load():
-        print(info, end="\r")
-        e = event_pb2.Event.FromString(raw_event)
-        try:
-            data_name, step, value = extract_data_from_event(e)
-            if data_name not in data_dict:
-                data_dict[data_name] = []
-            data_dict[data_name].append((step, value))
-        except:
-            pass    
-        if time.time() - start_time > 1:
-            info += "."
-            start_time = time.time()
-    print()
-    return data_dict
+def configure_matplotlib():
+    # print(plt.style.available)
+    plt.style.use('seaborn-v0_8-pastel')
+    plt.rcParams['font.size'] = 12
+    plt.rcParams['axes.labelsize'] = 12
+    plt.rcParams['axes.labelweight'] = 'bold'
+    plt.rcParams['axes.titlesize'] = 12
+    plt.rcParams['xtick.labelsize'] = 12
+    plt.rcParams['ytick.labelsize'] = 12
+    plt.rcParams['legend.fontsize'] = 12
+    plt.rcParams['figure.titlesize'] = 12
+    plt.rcParams['text.usetex'] = True
 
 def plot_loss(data_dict):
     if 'loss' not in data_dict:
@@ -116,7 +105,7 @@ def plot_cumulative_success(data_dict):
     plt.xlabel("Episodes")
     plt.ylabel("Cumulative successes")
 
-if __name__ == "__main__":
+def parse_args_for_tb():
     args = sys.argv[1:]
     if len(args) > 0:
         if args[0] == "--folder":
@@ -145,4 +134,51 @@ if __name__ == "__main__":
                 print("Folder not found")
                 sys.exit(1)
 
-            
+def get_data(plot_name):
+    dir = "./plot_data/" + plot_name 
+    dirs = os.listdir(dir)
+    data = {}
+    for d in dirs:
+        data[d] = {
+            "data": pd.read_csv(os.path.join(dir, d)+"/data.csv"),
+            "config": RLConfig(yaml.load(open(os.path.join(dir, d)+"/config.yaml"), Loader=yaml.FullLoader))
+        }
+    return data
+
+def random_agent_plot():
+    data = get_data("random_agent")
+    df = data["random_agent"]["data"]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Steps")
+    ax.set_yticks([200])
+
+    ax.set_title("Episode length")
+
+    metric = df[df.metric == "episodes/episode_length"]
+    ax.plot(metric.step, metric.value, label="Episode length")
+
+def dqn_plot_1():
+    data = get_data("dqn")
+    df = data["dqn"]["data"]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Steps")
+    ax.set_yticks([200])
+
+    ax.set_title("Episode length")
+
+    metric = df[df.metric == "episodes/episode_length"]
+    ax.plot(metric.step, metric.value, label="Episode length")
+
+    plt.show()
+
+if __name__ == "__main__":
+    configure_matplotlib()
+    random_agent_plot()
+    plt.show()
+    
