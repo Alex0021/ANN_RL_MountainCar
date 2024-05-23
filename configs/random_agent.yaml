@@ -1,0 +1,4 @@
+agent_type: random
+
+data_path: "plot_data/random_agent/random_agent"
+num_episodes: 100

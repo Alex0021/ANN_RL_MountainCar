@@ -1,0 +1,12 @@
+agent_type: dqn
+
+num_episodes: 1000
+discount: 0.99
+epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
+alpha: 1e-3
+batch_size: 64
+use_target_network: true
+heuristic_reward_type: None 
+
+
+data_path: "plot_data/dqn_agent"

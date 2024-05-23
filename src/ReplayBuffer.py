@@ -6,7 +6,7 @@ class ReplayBuffer():
     dim: state + action + next_state + reward (so state_dim * 2 + 2)
     """
     
-    def __init__(self, dim:int, MAX_STEPS:int, MAX_EPISODES:int=1):
+    def __init__(self, dim:int, MAX_STEPS:int, MAX_EPISODES:int=1, type:str="complete"):
         self.MAX_EPISODES = MAX_EPISODES
         self.MAX_STEPS = MAX_STEPS
         self.dim = dim # state + action + next_state + reward + aux_reward + done (so state_dim * 2 + 4)
@@ -19,8 +19,7 @@ class ReplayBuffer():
         self.total_size = 0
         self.unique_actions = set()
 
-
-    def add(self, state:np.ndarray, action:int, next_state:np.ndarray, reward:float, aux_reward:float, done:bool):
+    def _complete_add(self, state:np.ndarray, action:int, next_state:np.ndarray, reward:float, aux_reward:float, done:bool):
         if self.step_ptr >= self.MAX_STEPS:
             raise ValueError("maximum episode length exceeded.")
 

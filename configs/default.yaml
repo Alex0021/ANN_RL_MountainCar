@@ -1,0 +1,35 @@
+env: 'gyms:gyms/CustomMountainCar-v0'
+log_dir: './logs/train'
+
+# base
+agent_type: default
+num_episodes: 3000
+buffer_size: 300
+max_steps: 200
+observation_space: 2
+action_space: 1
+
+# dqn
+gamma: 0.99
+epsilon: 0.1
+alpha: 1e-3
+batch_size: 64
+use_target_network: false
+heuristic_reward_type: None
+
+
+# rnd
+reward_factor: 2
+rnd_alpha: 0.01
+
+# dyna
+n_bins: (72,28)
+k: 64
+
+
+
+eval_mode: false
+eval_last_agent: false
+eval_path: ./models/model.pth
+
+plot_data: "plot_data/default"

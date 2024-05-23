@@ -6,7 +6,29 @@ from src.stats import StatsRecorder
 import os
 import types
 
-class RandomAgent():
+class Agent():
+    def __init__(self):
+        pass 
+    
+    def observe(self):
+        pass
+
+    def select_action(self):
+        pass
+
+    def update(self):
+        pass
+
+    def save(self):
+        pass
+
+    def load(self):
+        pass
+
+    def clear_models(self):
+        pass
+
+class RandomAgent(Agent):
     def __init__(self, num_actions:int, obs_dim:int, MAX_STEPS:int=200, MAX_EPISODES:int=1, stats:StatsRecorder=None):
         self.num_actions = num_actions
         self.dim = obs_dim * 2 + 4
@@ -17,15 +39,13 @@ class RandomAgent():
         # Save reward and action
         self.stats.record_action(action)
         self.stats.record_reward(reward, aux_reward)
-        self.replay_buffer.add(state, action, next_state, reward, done)
+        obs = np.concatenate([state, np.array([action]), next_state, [reward, aux_reward], np.array([done])])
+        self.replay_buffer.add(obs, done)
 
     def select_action(self, state, iter:int=0):
         return np.random.randint(0, self.num_actions)
 
-    def update(self):
-        pass
-
-class DqnAgent():
+class DqnAgent(Agent):
 
     def __init__(self, num_actions:int, 
                  obs_dim:int, 
@@ -114,8 +134,9 @@ class DqnAgent():
         # Save reward and action
         self.stats.record_action(action)
         self.stats.record_reward(reward, aux_reward)
+        obs = np.concatenate([state, np.array([action]), next_state, [reward, aux_reward], np.array([done])])
         # Store to buffer
-        self.replay_buffer.add(state, action, next_state, reward, aux_reward, done)
+        self.replay_buffer.add(obs, done)
 
     @torch.no_grad()
     def select_action(self, state, iter:int=0):
@@ -234,14 +255,16 @@ class DqnAgentRND(DqnAgent):
                          MAX_STEPS, MAX_EPISODES, BATCH_SIZE, stats, model_folder, 
                          export_frequency, eval, use_target_network, target_update_freq)
         
-        self.reward_factor = reward_factor
         self.RND_NORMALIZE_DELAY = RND_NORMALIZE_DELAY*MAX_STEPS
 
         self.rnd_reward = RNDreward(obs_dim, rnd_alpha, stats)
 
         if not isinstance(reward_factor, types.FunctionType):
-            reward_factor = lambda _: reward_factor
-        self.reward_factor = reward_factor
+            rw_f = lambda _: reward_factor
+        else:
+            rw_f = reward_factor
+            
+        self.reward_factor = rw_f
 
 
     @torch.enable_grad()
@@ -297,8 +320,10 @@ class DqnAgentRND(DqnAgent):
         aux_reward = self.rnd_reward.observe(next_state)
 
         self.stats.record_action(action)
+
+        obs = np.concatenate([state, np.array([action]), next_state, [reward, aux_reward], np.array([done])])
         
-        self.replay_buffer.add(state, action, next_state, reward, aux_reward, done)
+        self.replay_buffer.add(obs, done)
         
         # Save aux_reward to tensorboard
         # Use estimate of current normalization factors
@@ -415,12 +440,9 @@ class DynaAgent():
                  num_actions:int, 
                  obs_dim:int, 
                  discount:float=0.99, 
-                 epsilon:float|Callable=0.1,
-                 lr:float=0.1,
+                 epsilon:float|Callable=0.1, 
                  MAX_STEPS:int=200,
                  MAX_EPISODES:int=1,
-                 eval:bool=False,
-                 export_frequency:int=1_000,
                  k:int=10,
                  model_folder:str="models",
                  stats:StatsRecorder=None,
@@ -428,147 +450,68 @@ class DynaAgent():
                  action_ranges:list[list]=[[-1.2, 0.6], [-0.07, 0.07]]):
         
         self.num_actions = num_actions
-        self.dim = obs_dim + 2 # state + action
-        self.obs_dim = obs_dim
+        self.obs_dim = obs_dim + 1 # state + action
         self.discount = discount
         self.epsilon = epsilon
-        self.lr = lr
-        self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
+        self.replay_buffer = ReplayBuffer(self.obs_dim, MAX_STEPS, MAX_EPISODES)
         self.k = k
         self.stats = stats
         self.model_folder = model_folder
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.action_ranges = np.diff(np.array(action_ranges), axis=1).flatten()
+        self.action_ranges = np.diff(np.array(action_ranges), axis=1)
         self.actions_min = np.array(action_ranges)[:,0]
+        self.bin_sizes = np.divide(self.action_ranges, np.array(n_bins+1))
         self.n_bins = np.array(n_bins)
-        self.bin_sizes = np.divide(self.action_ranges, self.n_bins+1)
-        n_states = np.prod(self.n_bins+1)
-        self.update_counter = 0
-        self.export_frequency = export_frequency
+
+        n_states = np.prod(n_bins+1)
         
-        self.Q_table = np.zeros((n_states, num_actions))
-        self.R_table = np.zeros((n_states, num_actions))
-        self.P_table = np.zeros((n_states, num_actions, n_states))
-        self.bin_count_table = np.zeros((n_states, num_actions))
-
-        # Stats
-        self.Q_avg = 0
-        self.Q_head_right_avg = 0
-        self.Q_head_stay_avg = 0
-        self.Q_head_left_avg = 0
-
-        # Check for epsilon function
-        if eval:
-            epsilon = 0
-        if not isinstance(epsilon, types.FunctionType):
-            self.get_epsilon_value = lambda _: epsilon
-        else:
-            self.get_epsilon_value = epsilon
-
-        # clear models folder
-        if not eval:
-            if os.path.exists(model_folder):
-                print("Clearing models folder...")
-                self.clear_models(model_name=self.__class__.__name__)
-            else:
-                os.makedirs(model_folder)
+        self.Q_table = np.zeros(n_states, num_actions)
+        self.R_table = np.zeros(n_states, num_actions)
+        self.P_table = np.zeros(n_states, num_actions, n_states)
+        self.bin_count_table = np.zeros(n_states, num_actions)
 
     def state_to_idx_map(self, state):
-        if state.ndim == 1:
-            state = state.reshape(1, -1)
-        idx = np.floor(np.divide(state-self.actions_min, self.bin_sizes)) 
-        idx = np.clip(idx, 0, self.n_bins)
-        idx = idx[:,0]*self.n_bins[1] + idx[:,1]
-        return idx.astype(int)
+        idx = np.floor(np.divide(np.array(state)-self.actions_min, self.bin_sizes)) 
+        idx = np.clip(idx, [0,0], self.n_bins)
+        idx = idx[0] * self.bin_sizes[0] + idx[1]
+        return int(idx)
     
     def Q(self, state, action):
-        idx = self.state_to_idx_map(state)
+        idx = self.state_to_index_map(state)
         return self.Q_table[idx, int(action)]
     
     def R(self, state, action):
-        idx = self.state_to_idx_map(state)
+        idx = self.state_to_index_map(state)
         return self.R_table[idx, int(action)]
     
     def P(self, state, action, next_state):
-        idx0 = self.state_to_idx_map(state)
-        idx1 = self.state_to_idx_map(next_state)
+        idx0 = self.state_to_index_map(state)
+        idx1 = self.state_to_index_map(next_state)
         return self.P_table[idx0, int(action), idx1]
     
     def observe(self, state, action, next_state, reward, aux_reward, done=False):
-        # Save reward and action
-        self.stats.record_action(action)
-        self.stats.record_reward(reward, 0)
-
-        self.replay_buffer.add(np.concatenate([state, [action, done]]), done)
-        state_idx = self.state_to_idx_map(state)
-        next_state_idx = self.state_to_idx_map(next_state)
+        self.replay_buffer.add(np.concatenate([np.array(state), action]), done)
+        state_idx = self.state_to_index_map(state)
+        next_state_idx = self.state_to_index_map(next_state)
         self.P_table[state_idx, action, next_state_idx] += 1
 
-        # Running mean of rewards
         self.R_table[state_idx, action] *= self.bin_count_table[state_idx, action]
         self.R_table[state_idx, action] += reward
-        self.bin_count_table[state_idx, action] += 1
+        self.bin_count_table[state_idx, action] *= 1
         self.R_table[state_idx, action] /= self.bin_count_table[state_idx, action]
 
-        self.update_q_values(state, np.array([action]), np.array([done]))
+        self.update_q_values(state, action)
 
-    def update_q_values(self, state, action, done):
-        idx = self.state_to_idx_map(state).flatten()
-        idx_a = action.flatten().astype(int)
-        done_mask = 1 - done
-        target = self.discount * np.sum(self.P_table[idx, idx_a, :]/self.bin_count_table[idx, idx_a, np.newaxis] * np.max(self.Q_table, axis=1), axis=1) * done_mask.flatten()
-        self.Q_table[idx, idx_a] += self.lr * (self.R_table[idx, idx_a] + target - self.Q_table[idx, idx_a])
+    def update_q_values(self, state, action):
+        idx = self.state_to_index_map(state) # support broadcasting here
+        idx = np.concatenate([np.array(idx), np.array(action)])
+        self.Q_table[idx] = self.R_table[idx] + self.discount * np.sum(self.P_table[idx, :]/self.bin_count_table[idx] * np.max(self.Q_table, axis=1)) 
 
-    def select_action(self, state, iter:int=0):
-        e = self.get_epsilon_value(iter)
-        if self.stats is not None:
-            self.stats.record_epsilon(e)
-        if np.random.rand() < e:
-            return np.random.randint(0, self.num_actions)
-        else:
-            idx = self.state_to_idx_map(state)
-            return np.argmax(self.Q_table[idx])
+    def select_action(self, state):
+        pass
 
     def update(self):
-        if self.replay_buffer.total_size < self.k:
-            return
         # random k samples
-        k_samples = self.replay_buffer.sample(self.k)
-        states, actions, dones,_ = np.hsplit(k_samples, [self.obs_dim, self.obs_dim+1, self.obs_dim+2])
-        #actions = self.replay_buffer.sample_past_actions(self.k)
-        self.update_q_values(states, actions, dones)
-
-        self.update_counter += 1
-        # Update stats
-        self.Q_avg = np.mean(self.Q_table)
-        self.Q_head_right_avg = np.mean(self.Q_table[:,2])
-        self.Q_head_stay_avg = np.mean(self.Q_table[:,1])
-        self.Q_head_left_avg = np.mean(self.Q_table[:,0])
-        if self.stats is not None:
-            self.stats.log(**{
-                "training/mean_Q": (self.update_counter, self.Q_avg),
-                "training/Q_head_right": (self.update_counter, self.Q_head_right_avg),
-                "training/Q_head_stay": (self.update_counter, self.Q_head_stay_avg),
-                "training/Q_head_left": (self.update_counter, self.Q_head_left_avg),
-            })
-
-        if self.update_counter % self.export_frequency == 0:
-            self.save(model_name=self.__class__.__name__)
-
-
-    def save(self, model_name:str='agentXXX'):
-        name = f"{model_name}_model_{self.update_counter}.npy"
-        path = self.model_folder + "/" + name
-        np.save(path, self.Q_table)
-
-    def load(self, path):
-        self.Q_table = np.load(path)
-
-    def get_q_values(self, states):
-        idx = self.state_to_idx_map(np.array(states)).flatten()
-        return self.Q_table[idx,:]
-
-    def clear_models(self, model_name:str='agentXXX'):
-        for file in os.listdir(self.model_folder):
-            if file.startswith(model_name):
-                os.remove(os.path.join(self.model_folder, file))
+        k_samples = ...
+        states, actions = ...
+        self.update_q_values(states, actions)

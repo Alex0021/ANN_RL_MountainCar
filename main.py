@@ -7,6 +7,8 @@ import tqdm
 from src.ReplayBuffer import ReplayBuffer
 import os
 import sys
+import yaml
+from src.rl_config import RLConfig
 
 #========
 # GLOBALS
@@ -115,7 +117,7 @@ def generate_graphs(stats:StatsRecorder, agent_name:str="agent"):
 
     plt.show()
 
-def train_rnd_agent(env:gym.Env, agent:DqnAgentRND):
+def train_rnd_agent(env:gym.Env, agent:DqnAgentRND, config:RLConfig):
     total_steps = 0
     total_episodes = 0
     np.random.seed(np.random.randint(0, 10000000))
@@ -148,8 +150,10 @@ def train_rnd_agent(env:gym.Env, agent:DqnAgentRND):
             total_steps += 1
         total_episodes += 1
         stats.stop_recording()
+    stats.export_data(path=config.data_path)
+    config.export()
 
-def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent):
+def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, config:RLConfig):
     total_steps = 0
     total_episodes = 0
     stats = agent.stats
@@ -160,16 +164,20 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent):
         stats.start_recording()
         while not done:
             action = agent.select_action(state, i)
-            next_state, tot_reward, terminated, truncated, infos = env.step(int(action))
+            next_state, tot_reward, terminated, truncated, infos = env.step(int(action), reward_type=config.heuristic_reward_type)
             aux_reward = infos.get("aux_reward", 0)
             reward = infos.get("env_reward", 0)
             done  = terminated or truncated
+            if not config.use_heuristic_reward:
+                aux_reward = 0
             agent.observe(state, action, next_state, reward, aux_reward, done)
             agent.update()
             state = next_state
             total_steps += 1
         total_episodes += 1
         stats.stop_recording()
+    stats.export_data(path=config.data_path)
+    config.export()
 
 def evaluate_agent(agent_type:str, path:str, MAX_EPISODES:int=1_000_000):
     stats = StatsRecorder(1_000_000, 
@@ -262,120 +270,84 @@ def evaluate_last_model(agent_type:str, MAX_EPISODES:int=1_000_000):
             episode_steps += 1
         stats.stop_recording()
         total_episodes += 1
-    
+
 if __name__ == "__main__":
 
-    args = sys.argv[1:]
+    config_path = sys.argv[1]
+    config = yaml.safe_load(open(config_path, "r"))
+    config = RLConfig(config)
 
     # env = gym.make('MountainCar-v0')
-    env = gym.make('gyms:gyms/CustomMountainCar-v0')
+    env = gym.make(config.env)
 
-    # Training parameters
-    total_episodes = 3_000
-    MAX_EPISODES = 500
-
-    # agent parameters
-    obs_dim = env.observation_space.shape[0]
-    num_actions = env.action_space.n
+    print(f"obs dim: {env.observation_space.shape[0]}, action dim: {env.action_space.n}")
     BULK_SIZE = 1
-    MAX_STEPS = 200
-    BATCH_SIZE = 64
-    gamma = 0.99
-    epsilon = lambda iter: max(0.1*np.exp(-iter/(total_episodes/50)), 0.01)
-    # epsilon = lambda iter: max(np.exp(-(iter*5/total_episodes)), 0.07)
-    #epsilon = 0.1
-    alpha = 1e-3
-    reward_factor = lambda iter: np.exp(-(iter*10/(total_episodes*MAX_STEPS)))
 
-    if len(args) < 3:
-        raise ValueError("Needs at least 3 arguments: --agent [random|dqn|dqn-rnd] --train|--eval [--last|--model <model_number>]")
-
-    if args[0] == "--train":
-        eval_mode = False
-    elif args[0] == "--eval":
-        eval_mode = True
-    else:
-        raise ValueError("Specify train or eval mode as first argument")
-    
-
-    # Folder specified for eval
-    if eval_mode:
-        if args[1] == "--last":
-            if "--agent" not in args:
-                raise ValueError("No agent type specified")
-            evaluate_last_model(agent_type=args[args.index("--agent")+1])
-        elif args[1] == "--model":
-            if len(args) > 2:
-                agent_type = args[2].split("_")[0]
-                path = os.path.join("models", f"{args[2]}")
-                evaluate_agent(agent_type, path=path)
-            else:
-                raise ValueError("No model number provided")
+    if config.eval_mode:
+        if config.eval_last_model:
+            evaluate_last_model(agent_type=config.agent_type)
         else:
-            if "--agent" not in args:
-                raise ValueError("No agent type specified")
-            evaluate_last_model(agent_type=args[args.index("--agent")+1])
+            evaluate_agent(config.agent_type, config.model_path)
         sys.exit(0)
     
-    
-    stats = StatsRecorder(total_episodes, 
-                        MAX_STEPS, 
+    stats = StatsRecorder(config.num_episodes, 
+                        config.max_steps, 
                         BULK_SIZE,
-                        num_actions,
-                        log_dir="logs/train"
-                        )
+                        env.action_space.n,
+                        log_dir=config.log_dir)
     
-    agent_arg_idx = args.index("--agent")
-    if args[agent_arg_idx+1] == "random":
-        agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], MAX_EPISODES=MAX_EPISODES)
-    elif args[agent_arg_idx+1] == "dqn":
+    if config.agent_type == "random":
+        agent = RandomAgent(env.action_space.n, 
+                            env.observation_space.shape[0], 
+                            MAX_EPISODES=config.buffer_size, 
+                            stats=stats)
+    elif config.agent_type == "dqn":
         agent = DqnAgent(env.action_space.n, 
                         env.observation_space.shape[0], 
-                        discount=gamma, 
-                        epsilon=epsilon, 
-                        alpha=alpha, 
-                        MAX_STEPS=MAX_STEPS, 
-                        MAX_EPISODES=MAX_EPISODES, 
-                        BATCH_SIZE=BATCH_SIZE, 
-                        use_target_network=True,
-                        eval=eval_mode,
-                        stats=stats
-                        )
-    elif args[agent_arg_idx+1] == "dqn-rnd":
+                        discount=config.gamma, 
+                        epsilon=config.epsilon, 
+                        alpha=config.alpha, 
+                        MAX_STEPS=config.max_steps, 
+                        MAX_EPISODES=config.buffer_size, 
+                        BATCH_SIZE=config.batch_size, 
+                        use_target_network=config.use_target_network,
+                        eval=config.eval_mode,
+                        stats=stats)
+    elif config.agent_type == "dqn-rnd":
         agent = DqnAgentRND(env.action_space.n, 
                         env.observation_space.shape[0], 
-                        discount=gamma, 
-                        epsilon=epsilon, 
-                        alpha=alpha, 
-                        MAX_STEPS=MAX_STEPS, 
-                        MAX_EPISODES=MAX_EPISODES, 
-                        BATCH_SIZE=BATCH_SIZE, 
-                        use_target_network=True,
-                        eval=eval_mode,
+                        discount=config.gamma, 
+                        epsilon=config.epsilon, 
+                        alpha=config.alpha, 
+                        MAX_STEPS=config.max_steps, 
+                        MAX_EPISODES=config.buffer_size, 
+                        BATCH_SIZE=config.batch_size, 
+                        use_target_network=config.use_target_network,
+                        eval=config.eval_mode,
                         stats=stats,
-                        rnd_alpha=0.01,
-                        reward_factor=reward_factor
+                        rnd_alpha=config.rnd_alpha,
+                        reward_factor=config.reward_factor,
         )
-    elif args[agent_arg_idx+1] == "dyna":
+    elif config.agent_type == "dyna":
         agent = DynaAgent(env.action_space.n, 
                         env.observation_space.shape[0], 
-                        discount=gamma, 
-                        epsilon=epsilon, 
-                        MAX_STEPS=MAX_STEPS, 
-                        MAX_EPISODES=MAX_EPISODES, 
-                        eval=eval_mode,
+                        discount=config.gamma, 
+                        epsilon=config.epsilon, 
+                        MAX_STEPS=config.max_steps, 
+                        MAX_EPISODES=config.buffer_size, 
+                        eval=config.eval_mode,
                         stats=stats,
-                        lr=0.2,
-                        n_bins=(72,28),
-                        k=BATCH_SIZE
+                        lr=config.alpha,
+                        n_bins=config.n_bins,
+                        k=config.k,
         )
     else:
         raise ValueError("Invalid agent type")
     
     if agent.__class__.__name__ == "DqnAgentRND":
-        train_rnd_agent(env, agent)
+        train_rnd_agent(env, agent, config)
     else:
-        train_agent(env, agent)
+        train_agent(env, agent, config)
 
         #evaluate_last_model()
 

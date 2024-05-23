@@ -2,6 +2,8 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 import time
 import platform
+from src.data_utils import tflog2pandas
+import os
 
 SH_SCRIPT = """
             # Check most recent dir
@@ -63,9 +65,9 @@ class StatsRecorder:
         self.step_index = 0
         
     def stop_recording(self):
-        self.episode_length[self.episode_index] = self.step_index + 1
+        self.episode_length[self.episode_index] = self.step_index
         self.log(**{
-            "episodes/episode_length": (self.episode_index, self.step_index + 1),
+            "episodes/episode_length": (self.episode_index, self.step_index),
             "episodes/episode_reward": (self.episode_index, np.sum(self.episode_rewards[self.episode_index])),
             "episodes/episode_completed": (self.episode_index, self.step_index < self.steps_num - 1),
             "episodes/episode_actions": (self.episode_index, {"left":self.actions_count[0],
@@ -136,4 +138,16 @@ class StatsRecorder:
         for i in range(multiple):
             points[i,:] = np.array([(i + 1)*self.bulk_size,np.mean(self.episode_length[i*self.bulk_size : (i + 1)*self.bulk_size])])
         return points
+
+    def export_data(self, path):
+        df = tflog2pandas(self.writer.log_dir)
+        if not os.path.exists(path):
+            os.makedirs(path)
+        path = path + "/data.csv"
+        df.to_csv(path)
+        
+
+        
+
+
 
