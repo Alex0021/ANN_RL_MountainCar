@@ -1,0 +1,24 @@
+action_space: 1
+agent_type: dqn
+alpha: 1e-3
+batch_size: 64
+buffer_size: 300
+data_path: plot_data/dqn_agent/no_heuristic
+discount: 0.99
+env: gyms:gyms/CustomMountainCar-v0
+epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
+eval_last_agent: false
+eval_mode: false
+eval_path: ./models/model.pth
+gamma: 0.99
+heuristic_reward_type: None
+k: 64
+log_dir: ./logs/train
+max_steps: 200
+n_bins: (72,28)
+num_episodes: 3000
+observation_space: 2
+plot_data: plot_data/default
+reward_factor: 2
+rnd_alpha: 0.01
+use_target_network: false

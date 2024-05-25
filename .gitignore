@@ -165,3 +165,5 @@ logs/eval/
 models/
 
 *.code-workspace
+
+*.csv
