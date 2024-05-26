@@ -6,8 +6,8 @@ epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
 alpha: 1e-3
 batch_size: 64
 use_target_network: false
+# use_target_network: true
 heuristic_reward_type: "speed_height" 
-# heuristic_reward_type: null 
 eval_mode: false
 
-data_path: "plot_data/dqn_agent/heuristic"
+data_path: "plot_data/dqn_agent/heuristic_no_target"

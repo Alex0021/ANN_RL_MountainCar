@@ -3,7 +3,7 @@ agent_type: dqn-rnd
 epsilon: 0
 rnd_alpha: 0.01
 reward_factor: "2 if iter < 200*max_steps else 0"
-use_target_network: false
+use_target_network: true
 
 num_episodes: 3000
 eval_mode: false

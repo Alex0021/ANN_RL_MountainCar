@@ -30,6 +30,8 @@ class CustomMountainCar(MountainCarEnv):
         normed_height = self.normed_height(state[0])**2
         if self.reward_type == "normed_speed":
             aux_reward = normed_speed
+        elif self.reward_type == "height":
+            aux_reward = normed_height
         elif self.reward_type == "normed_height":
             aux_reward = normed_height
         elif self.reward_type == "speed_height":
