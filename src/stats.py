@@ -114,8 +114,23 @@ class StatsRecorder:
             "steps/step_action": (self.total_steps, action)
         })
 
+    def record_state(self, state):
+        if self.step_index == 0:
+            self.log(**{
+                "states/start_pos": (self.episode_index, state[0])
+            })
+        self.log(**{
+                "states/pos": (self.episode_index, state[0]),
+                "states/vel": (self.episode_index, state[1]),
+            })
+
     def record_epsilon(self, epsilon):
         self.current_epsilon = epsilon
+
+    def record_dq(self, dq):
+        self.log(**{
+            "training/delta_q": (self.total_steps, dq)
+        })
 
     def log(self, **kwargs):
         for key, value in kwargs.items():
@@ -151,11 +166,11 @@ class StatsRecorder:
             points[i,:] = np.array([(i + 1)*self.bulk_size,np.mean(self.episode_length[i*self.bulk_size : (i + 1)*self.bulk_size])])
         return points
 
-    def export_data(self, path):
+    def export_data(self, path, filename="data.csv"):
         df = tflog2pandas(self.writer.log_dir)
         if not os.path.exists(path):
             os.makedirs(path)
-        path = path + "/data.csv"
+        path = os.path.join(path, filename)
         df.to_csv(path)
         
 
