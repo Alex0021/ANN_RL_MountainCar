@@ -176,6 +176,7 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, config:RLConfig):
         stats.stop_recording()
     stats.export_data(path=config.data_path)
     config.export()
+    agent.export_model(config.data_path)
 
 def evaluate_agent(agent_type:str, path:str, MAX_EPISODES:int=1_000_000):
     stats = StatsRecorder(1_000_000, 
@@ -186,17 +187,14 @@ def evaluate_agent(agent_type:str, path:str, MAX_EPISODES:int=1_000_000):
     env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode="human")
     total_episodes = 0
     match agent_type:
-        case DqnAgent.__class__.__name__:
-            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
-            path.join(path,".pth")
-        case DqnAgentRND.__class__.__name__:
-            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval=True)
-            path.join(path,".pth")
-        case DynaAgent.__class__.__name__:
-            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
-            path.join(path,".npy")
-        case RandomAgent.__class__.__name__:
-            agent = RandomAgent(env.action_space.n, env.observation_space.shape[0])
+        case "dqn":
+            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True, stats=stats)
+        case "qdqn-rnd":
+            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval=True, stats=stats)
+        case "dyna":
+            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], n_bins=(72,28), eval=True, stats=stats)
+        case "random":
+            agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], stats=stats)
     print(f'Loading model: "{path}"')
     agent.load(path)
     while total_episodes < MAX_EPISODES:
@@ -209,15 +207,16 @@ def evaluate_agent(agent_type:str, path:str, MAX_EPISODES:int=1_000_000):
             next_state, reward, terminated, truncated, infos = env.step(int(action))
             aux_reward = infos.get("aux_reward", 0)
             reward = infos.get("env_reward", 0)
+            done = terminated or truncated
             print("                                            ", end="\r")
             print(f"Reward: {reward+aux_reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
-            env.render()
+            agent.observe(state, action, next_state, reward, aux_reward, done)
             env.plot_state(next_state, reward, agent=agent)
-            done = terminated or truncated
             state = next_state
             episode_steps += 1
         stats.stop_recording()
         total_episodes += 1
+    stats.export_data(config.data_path, filename="eval_data.csv")
 
 def evaluate_last_model(agent_type:str, MAX_EPISODES:int=1_000_000):
     folder = "models"
@@ -261,7 +260,7 @@ def evaluate_last_model(agent_type:str, MAX_EPISODES:int=1_000_000):
             reward, aux_reward = infos.get("env_reward", 0), infos.get("aux_reward", 0)
             print("                                            ", end="\r")
             print(f"Reward: {tot_reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
-            env.render()
+            agent.observe(state, action, next_state, reward, aux_reward, terminated or truncated)
             env.plot_state(next_state, reward, agent=agent)
             done = terminated or truncated
             state = next_state
@@ -285,10 +284,10 @@ if __name__ == "__main__":
     BULK_SIZE = 1
 
     if config.eval_mode:
-        if config.eval_last_model:
-            evaluate_last_model(agent_type=config.agent_type)
+        if config.eval_last_agent:
+            evaluate_last_model(agent_type=config.agent_type, MAX_EPISODES=config.eval_episodes)
         else:
-            evaluate_agent(config.agent_type, config.model_path)
+            evaluate_agent(config.agent_type, config.eval_path, MAX_EPISODES=config.eval_episodes)
         sys.exit(0)
     
     stats = StatsRecorder(config.num_episodes, 
@@ -338,7 +337,7 @@ if __name__ == "__main__":
                         MAX_EPISODES=config.buffer_size, 
                         eval=config.eval_mode,
                         stats=stats,
-                        lr=config.alpha,
+                        lr=config.lr,
                         n_bins=config.n_bins,
                         k=config.k,
         )

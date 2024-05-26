@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.rl_config import RLConfig
 from src.data_utils import extract_data_from_event, extract_data_from_tb_file
+from src.agents import DynaAgent
 
 def configure_matplotlib():
     # print(plt.style.available)
@@ -126,13 +127,13 @@ def parse_args_for_tb():
                 print("Folder not found")
                 sys.exit(1)
 
-def get_data(plot_name):
+def get_data(plot_name, data_file="data.csv"):
     dir = "./plot_data/" + plot_name 
     dirs = os.listdir(dir)
     data = {}
     for d in dirs:
         data[d] = {
-            "data": pd.read_csv(os.path.join(dir, d)+"/data.csv"),
+            "data": pd.read_csv(os.path.join(dir, d)+"/"+data_file),
             "config": RLConfig(yaml.load(open(os.path.join(dir, d)+"/config.yaml"), Loader=yaml.FullLoader))
         }
     return data
@@ -301,12 +302,48 @@ def dyna_loss():
     data = get_data("dyna_agent")
     df = data["dyna"]["data"]
 
-    raise NotImplementedError
+    loss = df[df.metric == "training/delta_q"]
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Training steps")
+    ax.set_ylabel("Loss ($\Delta Q$)", interpreter='latex')
+    ax.set_title("Loss ($\Delta Q$)")
+    ax.plot(loss.step, loss.value)
+
+def dyna_start_pos():
+    data = get_data("dyna_agent", data_file="eval_data.csv")
+    df = data["dyna"]["data"]
+
+    start_pos = df[df.metric == "states/start_pos"]
+    ep_len = df[df.metric == "episodes/episode_length"]
+    fig = plt.figure()  
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Starting position")
+    ax.set_ylabel("Episode length")
+    ax.set_title("Episode length vs starting position")
+    ax.scatter(start_pos.value, ep_len.value)
+
+    ax.vlines(x=-0.5236, ymin=np.min(ep_len.value), ymax=np.max(ep_len.value), color='r', linestyle='--', linewidth=2)
+
 
 # PLOT #15 (4.4)
 def dyna_Q_values():
+    data = get_data("dyna_agent")
+    config = data["dyna"]["config"]
     # need to load Q table from file
-    raise NotImplementedError
+    dyna = DynaAgent(3,2, model_folder="./models")
+    q_table = dyna.load_recent(model_name=dyna.__class__.__name__)
+
+    max_q = np.max(q_table, axis=1)
+    new_q_table = max_q.reshape((config.n_bins[0]+1, config.n_bins[1]+1))
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Position")
+    ax.set_ylabel("Velocity")
+    ax.set_title("Q values")
+    ax.imshow(new_q_table, cmap='hot', interpolation='nearest', origin='lower')
+
+    plt.show()
 
 # PLOT #16 (4.4)
 def dyna_key_episodes():
@@ -342,8 +379,9 @@ if __name__ == "__main__":
     # dyna_episode_length()
     # dyna_cumulative_reward()
     # dyna_cumulative_success()
+    dyna_start_pos()
     # dyna_loss()
-    # dyna_Q_values()
+    #dyna_Q_values()
     # dyna_key_episodes()
     # dyna_key_Q_values()
     # comparison_env_rewards()
