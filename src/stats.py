@@ -4,6 +4,7 @@ import time
 import platform
 from src.data_utils import tflog2pandas
 import os
+import pandas as pd
 
 SH_SCRIPT = """
             # Check most recent dir
@@ -51,6 +52,9 @@ class StatsRecorder:
         dir_name = time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime())
         self.writer = SummaryWriter(log_dir=log_dir+"/"+dir_name, flush_secs=5, max_queue=5)
         self.current_epsilon = 0.0
+
+        self.traces = np.zeros((episode_num, steps_num, 2), dtype=np.float32)
+
         # create and write "launch_tensorboard" file
         if platform.system() == "Windows":
             file_extension = ".bat"
@@ -119,10 +123,8 @@ class StatsRecorder:
             self.log(**{
                 "states/start_pos": (self.episode_index, state[0])
             })
-        self.log(**{
-                "states/pos": (self.episode_index, state[0]),
-                "states/vel": (self.episode_index, state[1]),
-            })
+
+        self.traces[self.episode_index, self.step_index] = state
 
     def record_epsilon(self, epsilon):
         self.current_epsilon = epsilon
@@ -168,11 +170,17 @@ class StatsRecorder:
 
     def export_data(self, path, filename="data.csv"):
         df = tflog2pandas(self.writer.log_dir)
+
         if not os.path.exists(path):
             os.makedirs(path)
         path = os.path.join(path, filename)
         df.to_csv(path)
         
+    def export_traces(self, path, filename="traces.npy"):
+        if not os.path.exists(path):
+            os.makedirs(path)
+        path = os.path.join(path, filename)
+        np.save(path, self.traces)
 
         
 

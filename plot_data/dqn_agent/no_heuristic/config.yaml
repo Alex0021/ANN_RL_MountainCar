@@ -7,13 +7,15 @@ data_path: plot_data/dqn_agent/no_heuristic
 discount: 0.99
 env: gyms:gyms/CustomMountainCar-v0
 epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
+eval_episodes: 100000
 eval_last_agent: false
 eval_mode: false
-eval_path: ./models/model.pth
+eval_path: null
 gamma: 0.99
-heuristic_reward_type: None
+heuristic_reward_type: null
 k: 64
 log_dir: ./logs/train
+lr: 0.2
 max_steps: 200
 n_bins: (72,28)
 num_episodes: 3000

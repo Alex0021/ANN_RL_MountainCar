@@ -22,7 +22,7 @@ class Agent():
     def save(self):
         pass
 
-    def load(self):
+    def load(self, path):
         pass
 
     def clear_models(self):
@@ -61,7 +61,7 @@ class DqnAgent(Agent):
                  stats:StatsRecorder=None,
                  model_folder:str="models",
                  export_frequency:int=1_000,
-                 eval = False,
+                 eval_mode = False,
                  use_target_network = True,
                  target_update_freq = 10_000,
                  STEPS_DELAY:int=1_000):
@@ -118,7 +118,7 @@ class DqnAgent(Agent):
             self.target_q_network.load_state_dict(self.q_network.state_dict().copy())
 
         # Check for epsilon function
-        if eval:
+        if eval_mode:
             epsilon = 0
         if not isinstance(epsilon, types.FunctionType):
             self.get_epsilon_value = lambda _: epsilon
@@ -126,7 +126,7 @@ class DqnAgent(Agent):
             self.get_epsilon_value = epsilon
 
         # clear models folder
-        if not eval:
+        if not eval_mode:
             if os.path.exists(model_folder):
                 print("Clearing models folder...")
                 self.clear_models(model_name=self.__class__.__name__)
@@ -255,13 +255,13 @@ class DqnAgentRND(DqnAgent):
                  stats:StatsRecorder=None,
                  model_folder:str="models",
                  export_frequency:int=1_000,
-                 eval:bool=True,
+                 eval_mode:bool=True,
                  use_target_network:bool=False,
                  target_update_freq:int=10_000):
         
         super().__init__(num_actions, obs_dim, discount, epsilon, alpha, 
                          MAX_STEPS, MAX_EPISODES, BATCH_SIZE, stats, model_folder, 
-                         export_frequency, eval, use_target_network, target_update_freq)
+                         export_frequency, eval_mode, use_target_network, target_update_freq)
         
         self.RND_NORMALIZE_DELAY = RND_NORMALIZE_DELAY*MAX_STEPS
 
@@ -452,7 +452,7 @@ class DynaAgent():
                  lr:float=0.1,
                  MAX_STEPS:int=200,
                  MAX_EPISODES:int=1,
-                 eval:bool=True,
+                 eval_mode:bool=True,
                  export_frequency:int=1_000,
                  k:int=10,
                  model_folder:str="models",
@@ -463,8 +463,12 @@ class DynaAgent():
         self.num_actions = num_actions
         self.dim = obs_dim + 2 # state + action
         self.obs_dim = obs_dim
+        self.dim = obs_dim + 2 # state + action
+        self.obs_dim = obs_dim
         self.discount = discount
         self.epsilon = epsilon
+        self.lr = lr
+        self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
         self.lr = lr
         self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
         self.k = k
@@ -472,13 +476,18 @@ class DynaAgent():
         self.model_folder = model_folder
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.action_ranges = np.diff(np.array(action_ranges), axis=1).flatten()
+        self.action_ranges = np.diff(np.array(action_ranges), axis=1).flatten()
         self.actions_min = np.array(action_ranges)[:,0]
         self.n_bins = np.array(n_bins)
         self.bin_sizes = np.divide(self.action_ranges, self.n_bins+1)
         n_states = np.prod(self.n_bins+1)
         self.update_counter = 0
         self.export_frequency = export_frequency
-        self.eval = eval
+        self.bin_sizes = np.divide(self.action_ranges, self.n_bins+1)
+        n_states = np.prod(self.n_bins+1)
+        self.update_counter = 0
+        self.export_frequency = export_frequency
+        self.eval_mode = eval_mode
         
         self.Q_table = np.zeros((n_states, num_actions))
         self.R_table = np.zeros((n_states, num_actions))
@@ -492,7 +501,7 @@ class DynaAgent():
         self.Q_head_left_avg = 0
 
         # Check for epsilon function
-        if eval:
+        if eval_mode:
             epsilon = 0
         if not isinstance(epsilon, types.FunctionType):
             self.get_epsilon_value = lambda _: epsilon
@@ -500,7 +509,33 @@ class DynaAgent():
             self.get_epsilon_value = epsilon
 
         # clear models folder
-        if not eval:
+        if not eval_mode:
+            if os.path.exists(model_folder):
+                print("Clearing models folder...")
+                self.clear_models(model_name=self.__class__.__name__)
+            else:
+                os.makedirs(model_folder)
+        self.Q_table = np.zeros((n_states, num_actions))
+        self.R_table = np.zeros((n_states, num_actions))
+        self.P_table = np.zeros((n_states, num_actions, n_states))
+        self.bin_count_table = np.zeros((n_states, num_actions))
+
+        # Stats
+        self.Q_avg = 0
+        self.Q_head_right_avg = 0
+        self.Q_head_stay_avg = 0
+        self.Q_head_left_avg = 0
+
+        # Check for epsilon function
+        if eval_mode:
+            epsilon = 0
+        if not isinstance(epsilon, types.FunctionType):
+            self.get_epsilon_value = lambda _: epsilon
+        else:
+            self.get_epsilon_value = epsilon
+
+        # clear models folder
+        if not eval_mode:
             if os.path.exists(model_folder):
                 print("Clearing models folder...")
                 self.clear_models(model_name=self.__class__.__name__)
@@ -533,7 +568,7 @@ class DynaAgent():
         self.stats.record_action(action)
         self.stats.record_state(state)
         self.stats.record_reward(reward, 0)
-        if self.eval: return
+        if self.eval_mode: return
 
         self.replay_buffer.add(np.concatenate([state, [action, done]]), done)
         state_idx = self.state_to_idx_map(state)
@@ -547,18 +582,29 @@ class DynaAgent():
         self.R_table[state_idx, action] /= self.bin_count_table[state_idx, action]
 
         dq = self.update_q_values(state, np.array([action]), np.array([done]))
-        if self.stats is not None:
-            self.stats.record_dq(dq)
+
 
     def update_q_values(self, state, action, done):
         idx = self.state_to_idx_map(state).flatten()
         idx_a = action.flatten().astype(int)
         done_mask = 1 - done
         target = self.discount * np.sum(self.P_table[idx, idx_a, :]/self.bin_count_table[idx, idx_a, np.newaxis] * np.max(self.Q_table, axis=1), axis=1) * done_mask.flatten()
-        delta_q = self.lr * (self.R_table[idx, idx_a] + target - self.Q_table[idx, idx_a])
-        self.Q_table[idx, idx_a] += delta_q
-        return delta_q
+        dQ = self.lr * (self.R_table[idx, idx_a] + target - self.Q_table[idx, idx_a])
+        self.stats.log(**{
+            "training/dQ": (self.update_counter, np.mean(dQ)),
+        })
+        self.Q_table[idx, idx_a] += self.lr * (self.R_table[idx, idx_a] + target - self.Q_table[idx, idx_a])
 
+    def select_action(self, state, iter:int=0):
+        e = self.get_epsilon_value(iter)
+        if self.stats is not None:
+            self.stats.record_epsilon(e)
+        if np.random.rand() < e:
+            return np.random.randint(0, self.num_actions)
+        else:
+            idx = self.state_to_idx_map(state)
+            return np.argmax(self.Q_table[idx])
+        
     def select_action(self, state, iter:int=0):
         e = self.get_epsilon_value(iter)
         if self.stats is not None:
@@ -570,6 +616,8 @@ class DynaAgent():
             return np.argmax(self.Q_table[idx])
 
     def update(self):
+        if self.replay_buffer.total_size < self.k:
+            return
         if self.replay_buffer.total_size < self.k:
             return
         # random k samples
@@ -604,6 +652,11 @@ class DynaAgent():
     def load(self, path):
         self.Q_table = np.load(path)
 
+    def export_model(self, folder_path):
+        name = "model.npy"
+        path = folder_path + "/" + name
+        np.save(path, self.Q_table)
+
     def get_q_values(self, states):
         idx = self.state_to_idx_map(np.array(states)).flatten()
         return self.Q_table[idx,:]
@@ -613,16 +666,9 @@ class DynaAgent():
             if file.startswith(model_name):
                 os.remove(os.path.join(self.model_folder, file))
 
-    def load_recent(self, model_name:str='agentXXX'):
-        files = [f for f in os.listdir(self.model_folder) if f.startswith(model_name)]
+    def load_latest(self):
+        files = os.listdir(self.model_folder)
         if len(files) == 0:
             return
-        # use file creation time as key
-        files.sort(key=lambda x: os.path.getctime(self.model_folder + "/" + x))
-        self.Q_table = np.load(self.model_folder + "/" + files[-1])
-        return self.Q_table
-    
-    def export_model(self, folder_path):
-        name = "model.npy"
-        path = folder_path + "/" + name
-        np.save(path, self.Q_table)
+        latest = max(files, key=os.path.getctime)
+        self.Q_table = np.load(os.path.join(self.model_folder, latest))

@@ -167,3 +167,4 @@ models/
 *.code-workspace
 
 *.csv
+*.npy

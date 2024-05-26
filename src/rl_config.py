@@ -16,12 +16,15 @@ class RLConfig():
 
         if isinstance(self.epsilon, str):
             self.epsilon_str = self.epsilon
-            self.epsilon = lambda iter: eval(self.epsilon_str, {**self.config, "np": np }, {"iter":iter})
+            self.epsilon = lambda iter: eval(self.epsilon_str, {**self.config, "np": np}, {"iter":iter})
 
         # same for reward factor
         if isinstance(self.reward_factor, str):
             self.reward_factor_str = self.reward_factor
             self.reward_factor = lambda iter: eval(self.reward_factor_str, {**self.config, "np": np }, {"iter":iter})
+
+        if self.eval_path is None:
+            self.eval_path = self.data_path
 
     def parse_value(self, value):
         try:

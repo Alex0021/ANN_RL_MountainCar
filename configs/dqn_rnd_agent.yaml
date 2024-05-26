@@ -2,5 +2,10 @@ env: 'gyms:gyms/CustomMountainCar-v0'
 agent_type: dqn-rnd
 epsilon: 0
 rnd_alpha: 0.01
-reward_factor: 2 if iter < 200*max_steps else 0
-use_target_network: true
+reward_factor: "2 if iter < 200*max_steps else 0"
+use_target_network: false
+
+num_episodes: 3000
+eval_mode: false
+
+data_path: "plot_data/dqn_agent/rnd"

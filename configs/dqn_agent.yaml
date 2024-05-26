@@ -1,12 +1,13 @@
 agent_type: dqn
 
-num_episodes: 1000
+num_episodes: 3000
 discount: 0.99
 epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
 alpha: 1e-3
 batch_size: 64
-use_target_network: true
-heuristic_reward_type: None 
+use_target_network: false
+heuristic_reward_type: "speed_height" 
+# heuristic_reward_type: null 
+eval_mode: false
 
-
-data_path: "plot_data/dqn_agent"
+data_path: "plot_data/dqn_agent/heuristic"

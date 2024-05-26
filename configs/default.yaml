@@ -25,12 +25,12 @@ rnd_alpha: 0.01
 # dyna
 n_bins: (72,28)
 k: 64
-
+lr: 0.2
 
 
 eval_mode: false
 eval_last_agent: false
-eval_path: ./models/model.pth
+eval_path: null
 eval_episodes: 100_000
 
 plot_data: "plot_data/default"

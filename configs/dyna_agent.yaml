@@ -5,7 +5,7 @@ n_bins: (72,28)
 k: 64
 buffer_size: 500
 
-eval_mode: true
-eval_episodes: 100
-eval_path: 'plot_data/dyna_agent/dyna/model.npy'
+eval_mode: false
+
+num_episodes: 3000
 data_path: 'plot_data/dyna_agent/dyna'

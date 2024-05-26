@@ -1,13 +1,15 @@
 import os, sys
 import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap
 import numpy as np
-import time
 import yaml
 import pandas as pd
 
 from src.rl_config import RLConfig
 from src.data_utils import extract_data_from_event, extract_data_from_tb_file
+
 from src.agents import DynaAgent
+from main import evaluate_agent
 
 def configure_matplotlib():
     # print(plt.style.available)
@@ -71,7 +73,7 @@ def plot_episode_length(data_dict):
     plt.xlabel("Episodes")
     plt.ylabel("Episode length")
 
-def plot_episode_rewards(data_dict, window_size=100):
+def plot_episode_rewards(data_dict, window_size=100, ax=None):
     if 'episode_reward' not in data_dict:
         print("No episode reward data found in dictionary")
         return
@@ -82,6 +84,7 @@ def plot_episode_rewards(data_dict, window_size=100):
     episode_reward_avg = np.zeros_like(episode_reward)
     for i in range(window_size-1, len(episode_reward)):
         episode_reward_avg[i] = np.mean(episode_reward[max(0, i-window_size):i+1])
+    
     plt.figure()
     plt.plot(episode_steps[window_size-1:], episode_reward_avg[window_size-1:], linewidth=1.5)
     plt.title(f"Episode reward over an average window of {window_size} episodes")
@@ -132,6 +135,8 @@ def get_data(plot_name, data_file="data.csv"):
     dirs = os.listdir(dir)
     data = {}
     for d in dirs:
+        if d.startswith("."):
+            continue
         data[d] = {
             "data": pd.read_csv(os.path.join(dir, d)+"/"+data_file),
             "config": RLConfig(yaml.load(open(os.path.join(dir, d)+"/config.yaml"), Loader=yaml.FullLoader))
@@ -150,7 +155,7 @@ def plot_episode_length(df, window_size=100):
 
     ax.plot(metric.step, smooth_data(metric.value, window_size=100), label="Smoothed", color='orange')
 
-def plot_cumulative_reward(df):
+def plot_cumulative_reward(df, episode_limit=500):
     fig = plt.figure(figsize=(12, 6))
     ax = fig.add_subplot(121)
     ax.set_xlabel("Episode")
@@ -160,6 +165,8 @@ def plot_cumulative_reward(df):
     metric = df[df.metric == "episodes/episode_reward"]
     ax.scatter(metric.step, metric.value, label="No heuristic", s=1)
     ax.plot(metric.step, smooth_data(metric.value, window_size=100), label="Smoothed", color='orange')
+
+    df = df[df.step <= episode_limit]
 
     env_reward = df[df.metric == "episodes/episode_env_reward"]
     aux_reward = df[df.metric == "episodes/episode_aux_reward"]
@@ -218,7 +225,21 @@ def dqn_no_heuristic_reward():
     # metric = df[df.metric == "episodes/episode_reward"]
     # ax.scatter(metric.step, metric.value, label="Normed speed heuristic")
 
-    plt.show()
+
+# EXTRA (compare heuristic)
+def dqn_compare_heuristic_rewards():
+    data = get_data("dqn_agent")
+    data = [
+        data["heuristic"],
+        data["height"],
+    ]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+
+    for d in data:
+        metric = d["data"][d["data"].metric == "episodes/episode_length"]
+        ax.plot(metric.step, metric.value, label=d["config"].heuristic_reward)
 
 # PLOT #3 (3.3)
 def dqn_heuristic_episode_length():
@@ -232,7 +253,7 @@ def dqn_heuristic_cumulative_reward():
     data = get_data("dqn_agent")
     df = data["heuristic"]["data"]
     
-    plot_cumulative_reward(df)
+    plot_cumulative_reward(df, episode_limit=500)
 
 # PLOT #5 (3.3)
 def dqn_heuristic_cumulative_success():
@@ -294,7 +315,7 @@ def dyna_cumulative_reward():
 def dyna_cumulative_success():
     data = get_data("dyna_agent")
     df = data["dyna"]["data"]
-
+    
     plot_cumulative_success(df)
 
 # PLOT #14 (4.4)
@@ -328,41 +349,211 @@ def dyna_start_pos():
 
 # PLOT #15 (4.4)
 def dyna_Q_values():
-    data = get_data("dyna_agent")
-    config = data["dyna"]["config"]
-    # need to load Q table from file
-    dyna = DynaAgent(3,2, model_folder="./models")
-    q_table = dyna.load_recent(model_name=dyna.__class__.__name__)
+    agent = DynaAgent(3,2)
+    agent.load("./plot_data/dyna_agent/dyna/model.npy")
+    config = RLConfig(yaml.load(open("./plot_data/dyna_agent/dyna/config.yaml"), Loader=yaml.FullLoader))
 
-    max_q = np.max(q_table, axis=1)
-    new_q_table = max_q.reshape((config.n_bins[0]+1, config.n_bins[1]+1))
+    fig = plt.figure(figsize=(12, 6))
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Position")
+    ax.set_ylabel("Velocity")
+
+    ax.set_title("Q-values")
+
+    Q_table = agent.Q_table
+
+    max_Q = np.max(Q_table, axis=1)
+    new_Q_table = max_Q.reshape((config.n_bins[0]+1, config.n_bins[1]+1))
+
+    masked_Q_table = np.ma.masked_where(new_Q_table == 0, new_Q_table)
+
+    # ax.imshow(new_Q_table, cmap='coolwarm', aspect='auto', extent=[-1.2, 0.6, -0.07, 0.07])
+    ax.imshow(masked_Q_table, cmap='coolwarm', aspect='auto', extent=[-1.2, 0.6, -0.07, 0.07], origin='lower')
+
+# PLOT #16 (4.4)
+def dyna_key_episodes():
+    key_episode_index = [0, 62, 1670, 1877]
+
+    data = np.load("./plot_data/dyna_agent/dyna/traces.npy", allow_pickle=True)
+    fig = plt.figure(figsize=(10, 10))
+    
+    colors = plt.get_cmap('viridis')(np.linspace(0, 1, 200))
+
+    for i, episode in enumerate(key_episode_index):
+        ax = fig.add_subplot(len(key_episode_index)//2, len(key_episode_index)//2, i+1)
+        ax.set_xlabel("Position")
+        ax.set_ylabel("Velocity")
+        ax.set_title(f"Episode {episode+1}")
+        ax.set_xlim(-1.5, 1)
+        ax.set_ylim(-0.1, 0.1)
+        ax.set_xticks([-1.2, -0.6, 0, 0.6])
+        ax.set_yticks([-0.07, 0, 0.07])
+
+        episode_data = data[episode]
+
+        # filter out zeros
+        episode_data = episode_data[~np.all(episode_data == 0, axis=1)]
+        n = episode_data.shape[0]
+        ax.scatter(episode_data[:,0], episode_data[:,1], color=colors[:n])
+
+def dyna_trace_animation():
+    data = np.load("./plot_data/dyna_agent/dyna/traces.npy", allow_pickle=True)
     fig = plt.figure()
     ax = fig.add_subplot(111)
     ax.set_xlabel("Position")
     ax.set_ylabel("Velocity")
-    ax.set_title("Q values")
-    ax.imshow(new_q_table, cmap='hot', interpolation='nearest', origin='lower')
+    ax.set_title("Episode trace")
 
-    plt.show()
 
-# PLOT #16 (4.4)
-def dyna_key_episodes():
-    raise NotImplementedError
+    colors = plt.get_cmap('viridis')(np.linspace(0, 1, 200))
+
+    for i, episode in enumerate(data):
+        episode = episode[~np.all(episode == 0, axis=1)]
+        n = episode.shape[0]
+        ax.set_xlim(-1.5, 1)
+        ax.set_ylim(-0.1, 0.1)
+        ax.set_xticks([-1.2, -0.6, 0, 0.6])
+        ax.set_yticks([-0.07, 0, 0.07])
+        ax.scatter(episode[:,0], episode[:,1], color=colors[:n])
+        plt.savefig(f"./plot_data/dyna_agent/dyna/frames/frame_{i:04d}.png")
+        ax.cla()
+
 
 # PLOT #17 (4.4) (bonus)
-def dyna_key_Q_values():
-    raise NotImplementedError
+def dyna_Q_values_at_key_episodes():
+    models = [1000, 10_000, 50_000, 384_000]
+    agent = DynaAgent(3,2)
+    config = RLConfig(yaml.load(open("./plot_data/dyna_agent/dyna/config.yaml"), Loader=yaml.FullLoader))
+
+    fig = plt.figure(figsize=(15, 7))
+    for i, model in enumerate(models):
+        agent.load(f"./models/DynaAgent_model_{model}.npy")
+        ax = fig.add_subplot(len(models)//2, len(models)//2, i+1)
+        ax.set_xlabel("Position")
+        ax.set_ylabel("Velocity")
+
+        ax.set_title(f"Q-values at {model} updates")
+
+        Q_table = agent.Q_table
+
+        max_Q = np.max(Q_table, axis=1)
+        new_Q_table = max_Q.reshape((config.n_bins[0]+1, config.n_bins[1]+1))
+        masked_Q_table = np.ma.masked_where(new_Q_table == 0, new_Q_table)
+        # ax.imshow(new_Q_table, cmap='coolwarm', aspect='auto', extent=[-1.2, 0.6, -0.07, 0.07])
+        ax.imshow(masked_Q_table, cmap='coolwarm', aspect='auto', extent=[-1.2, 0.6, -0.07, 0.07], origin='lower')
+
 
 # PLOT #18 (4.5) 
 def comparison_env_rewards():
-    raise NotImplementedError
+    
+    # load the data
+    data = get_data("dqn_agent")
+    data = [
+        data["no_heuristic"],
+        data["heuristic"],
+        data["rnd"]
+    ]
+
+    data.append(get_data("dyna_agent")["dyna"])
+
+    data = [d["data"]for d in data]
+
+    metrics = [d[d.metric == "episodes/episode_env_reward"] for d in data]
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Environment Reward")
+
+    names = ["No heuristic", "Heuristic", "RND", "Dyna"]
+
+    for name, metric in zip(names, metrics):
+        value = smooth_data(metric.value, window_size=100)
+        ax.plot(metric.step, value, label=name)
+
+    ax.legend()
+
+
 
 # PLOT #19 (4.5)
 def comparison_eval_performance():
-    raise NotImplementedError
+    seeds = [np.random.randint(0, 100000) for _ in range(1000)]
+
+    # load the models
+    paths = [
+        "dqn_agent/no_heuristic",
+        "dqn_agent/heuristic",
+        # "dqn_agent/rnd",
+        "dyna_agent/dyna",
+    ]
+
+    configs = [
+        RLConfig(yaml.load(open("./plot_data/"+path+"/config.yaml"), Loader=yaml.FullLoader))
+        for path in paths
+    ]
+
+    for config in configs:
+        config.num_episodes = 1000
+        config.eval_mode = True
+
+    # run the models
+    results = []
+    for config in configs:
+        evaluate_agent(config, seeds, render=False)
+
+    # load the results
+    for path in paths:
+        results.append(pd.read_csv("./plot_data/"+path+"/eval_data.csv"))
+
+    # plot the results
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Environment Reward")
+
+    names = ["No heuristic", 
+             "Heuristic", 
+            #  "RND", 
+             "Dyna"]
+
+    for name, results in zip(names, results):
+        metric = results[results.metric == "episodes/episode_env_reward"]
+        value = smooth_data(metric.value, window_size=100)
+        ax.plot(metric.step, value, label=name)
+
+    ax.legend()
 
 
-    
+def generate_all_plots():
+    configure_matplotlib()
+    fs = [
+        random_agent_plot,
+        dqn_no_heuristic_reward,
+        dqn_heuristic_episode_length,
+        dqn_heuristic_cumulative_reward,
+        dqn_heuristic_cumulative_success,
+        dqn_heuristic_loss,
+        dqn_rnd_episode_length,
+        dqn_rnd_cumulative_reward,
+        dqn_rnd_cumulative_success,
+        dqn_rnd_loss,
+        dyna_episode_length,
+        dyna_cumulative_reward,
+        dyna_cumulative_success,
+        dyna_start_pos,
+        dyna_loss,
+        dyna_Q_values,
+        dyna_key_episodes,
+        dyna_Q_values_at_key_episodes,
+        comparison_env_rewards,
+        comparison_eval_performance
+    ]
+
+    for f in fs:
+        f()
+        plt.savefig(f"./plots/{f.__name__}.svg")
+        plt.close()
+
 
 if __name__ == "__main__":
     configure_matplotlib()
@@ -379,13 +570,14 @@ if __name__ == "__main__":
     # dyna_episode_length()
     # dyna_cumulative_reward()
     # dyna_cumulative_success()
-    dyna_start_pos()
+    # dyna_start_pos()
     # dyna_loss()
-    #dyna_Q_values()
+    # dyna_Q_values()
     # dyna_key_episodes()
-    # dyna_key_Q_values()
+    # dyna_trace_animation()
+    # dyna_Q_values_at_key_episodes()
     # comparison_env_rewards()
-    # comparison_eval_performance()
+    comparison_eval_performance()
 
     plt.show()
     

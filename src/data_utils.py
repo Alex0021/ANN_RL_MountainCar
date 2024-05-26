@@ -6,6 +6,8 @@ import traceback
 import pandas as pd
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
+import os
+
 def extract_data_from_event(e):
     data_name = e.summary.value[0].tag.split('/')[-1]
     value = e.summary.value[0].simple_value
@@ -55,4 +57,5 @@ def tflog2pandas(path):
         print("Event file possibly corrupt: {}".format(path))
         traceback.print_exc()
     return runlog_data
+
 

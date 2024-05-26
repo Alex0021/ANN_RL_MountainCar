@@ -12,12 +12,11 @@ class CustomMountainCar(MountainCarEnv):
         self.middle_x = -np.pi/6
         self.fig = plt.figure(num=1)
         self.reward_type = reward_type
+        print(f"Reward type: {self.reward_type}")
 
     def step(self, action):
         state = self.state
         next_state, reward, terminated, truncated, _ = super(CustomMountainCar, self).step(action)
-        if self.reward_type == None:
-            return next_state, reward, terminated, truncated, {"env_reward": reward}
         # reward = 1 if reward 
         # n_height = self.normed_height(state[0])
         # pos_sign = 1 if state[0] > self.middle_x else -1
@@ -28,9 +27,18 @@ class CustomMountainCar(MountainCarEnv):
         # reward += 1 if terminated else 0
         speed  = abs(state[1])
         normed_speed = speed / 0.07
-        aux_reward = normed_speed
+        normed_height = self.normed_height(state[0])**2
+        if self.reward_type == "normed_speed":
+            aux_reward = normed_speed
+        elif self.reward_type == "normed_height":
+            aux_reward = normed_height
+        elif self.reward_type == "speed_height":
+            aux_reward = normed_speed + normed_height
+        elif self.reward_type == "max_height":
+            aux_reward = self.max_height_reward(state)
+        else:
+            aux_reward = 0
         # reward += self.max_height_reward(state)
-        aux_reward += self.normed_height(state[0])**2
         return next_state, reward+aux_reward, terminated, truncated, {"aux_reward": aux_reward, "env_reward": reward}
     
     def max_height_reward(self, state):
@@ -42,7 +50,6 @@ class CustomMountainCar(MountainCarEnv):
             self.max_l = n_height
             return 0.5
         return 0
-
 
     def normed_height(self, x):
         height = self.curve(x) + 1 

@@ -3,12 +3,13 @@ agent_type: dyna
 alpha: 1e-3
 batch_size: 64
 buffer_size: 500
-data_path: ./plot_data/dyna_agent/dyna
+data_path: plot_data/dyna_agent/dyna
 env: gyms:gyms/CustomMountainCar-v0
-epsilon: max(0.1*np.exp(-iter/(num_episodes/150)), 0.01)
+epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
+eval_episodes: 100000
 eval_last_agent: false
 eval_mode: false
-eval_path: ./models/model.pth
+eval_path: null
 gamma: 0.99
 heuristic_reward_type: None
 k: 64
@@ -16,7 +17,7 @@ log_dir: ./logs/train
 lr: 0.2
 max_steps: 200
 n_bins: (72,28)
-num_episodes: 10000
+num_episodes: 3000
 observation_space: 2
 plot_data: plot_data/default
 reward_factor: 2

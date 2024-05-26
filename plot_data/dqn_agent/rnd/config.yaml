@@ -6,13 +6,15 @@ buffer_size: 300
 data_path: plot_data/dqn_agent/rnd
 env: gyms:gyms/CustomMountainCar-v0
 epsilon: 0
+eval_episodes: 100000
 eval_last_agent: false
 eval_mode: false
-eval_path: ./models/model.pth
+eval_path: null
 gamma: 0.99
 heuristic_reward_type: None
 k: 64
 log_dir: ./logs/train
+lr: 0.2
 max_steps: 200
 n_bins: (72,28)
 num_episodes: 3000

@@ -152,6 +152,8 @@ def train_rnd_agent(env:gym.Env, agent:DqnAgentRND, config:RLConfig):
         stats.stop_recording()
     stats.export_data(path=config.data_path)
     config.export()
+    agent.export_model(config.data_path)
+    stats.export_traces(config.data_path)
 
 def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, config:RLConfig):
     total_steps = 0
@@ -177,29 +179,51 @@ def train_agent(env:gym.Env, agent:DqnAgent|RandomAgent, config:RLConfig):
     stats.export_data(path=config.data_path)
     config.export()
     agent.export_model(config.data_path)
+    stats.export_traces(config.data_path)
 
-def evaluate_agent(agent_type:str, path:str, MAX_EPISODES:int=1_000_000):
+def evaluate_agent(config:RLConfig, seeds:list[int]=None, render:bool=True):
+    
+    path = config.eval_path
+
+    if not path.endswith(".npy") and not path.endswith(".pth"):
+        if config.agent_type == "dyna":
+            path = f"{path}/model.npy"
+        else: 
+            path = f"{path}/model.pth"
+
+    MAX_EPISODES = config.num_episodes
+    
     stats = StatsRecorder(1_000_000, 
                         200, 
                         1,
                         3, 
                         log_dir="logs/eval")
-    env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode="human")
+    
+    render_mode = "human" if render else None
+    env = gym.make('gyms:gyms/CustomMountainCar-v0', render_mode=render_mode)
+    
+    if seeds is not None:
+        assert len(seeds) == MAX_EPISODES, "Number of seeds must match number of episodes"
+    else:
+        seeds = [np.random.randint(0, 10000000) for _ in range(MAX_EPISODES)]
+
     total_episodes = 0
-    match agent_type:
+    match config.agent_type:
         case "dqn":
-            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True, stats=stats)
-        case "qdqn-rnd":
-            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval=True, stats=stats)
+            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval_mode=True, stats=stats)
+        case "dqn-rnd":
+            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval_mode=True, stats=stats)
         case "dyna":
-            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], n_bins=(72,28), eval=True, stats=stats)
+            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], n_bins=(72,28), eval_mode=True, stats=stats)
         case "random":
             agent = RandomAgent(env.action_space.n, env.observation_space.shape[0], stats=stats)
+
     print(f'Loading model: "{path}"')
     agent.load(path)
-    while total_episodes < MAX_EPISODES:
+
+    for i in tqdm.tqdm(range(MAX_EPISODES), ncols=75):
         done = False
-        state, _ = env.reset()
+        state, _ = env.reset(seed=seeds[i])
         stats.start_recording()
         episode_steps = 1
         while not done:
@@ -208,15 +232,17 @@ def evaluate_agent(agent_type:str, path:str, MAX_EPISODES:int=1_000_000):
             aux_reward = infos.get("aux_reward", 0)
             reward = infos.get("env_reward", 0)
             done = terminated or truncated
-            print("                                            ", end="\r")
-            print(f"Reward: {reward+aux_reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
+            # print("                                            ", end="\r")
+            # print(f"Reward: {reward+aux_reward:.5f}, Action: {action}, Step: {episode_steps}", end="\r")
             agent.observe(state, action, next_state, reward, aux_reward, done)
-            env.plot_state(next_state, reward, agent=agent)
+            if render:
+                env.plot_state(next_state, reward, agent=agent)
             state = next_state
             episode_steps += 1
         stats.stop_recording()
         total_episodes += 1
     stats.export_data(config.data_path, filename="eval_data.csv")
+    stats.export_traces(config.data_path, filename="eval_traces.npy")
 
 def evaluate_last_model(agent_type:str, MAX_EPISODES:int=1_000_000):
     folder = "models"
@@ -232,11 +258,11 @@ def evaluate_last_model(agent_type:str, MAX_EPISODES:int=1_000_000):
     total_episodes = 0
     match agent_type:
         case "dqn":
-            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval=True)
+            agent = DqnAgent(env.action_space.n, env.observation_space.shape[0], eval_mode=True)
         case "dqn-rnd":
-            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval=True)
+            agent = DqnAgentRND(env.action_space.n, env.observation_space.shape[0], eval_mode=True)
         case "dyna":
-            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], n_bins=(72,28), eval=True)
+            agent = DynaAgent(env.action_space.n, env.observation_space.shape[0], n_bins=(72,28), eval_mode=True)
         case "random":
             agent = RandomAgent(env.action_space.n, env.observation_space.shape[0])
     while total_episodes < MAX_EPISODES:
@@ -285,9 +311,9 @@ if __name__ == "__main__":
 
     if config.eval_mode:
         if config.eval_last_agent:
-            evaluate_last_model(agent_type=config.agent_type, MAX_EPISODES=config.eval_episodes)
+            evaluate_last_model(agent_type=config.agent_type, MAX_EPISODES=config.num_episodes)
         else:
-            evaluate_agent(config.agent_type, config.eval_path, MAX_EPISODES=config.eval_episodes)
+            evaluate_agent(config)
         sys.exit(0)
     
     stats = StatsRecorder(config.num_episodes, 
@@ -311,7 +337,7 @@ if __name__ == "__main__":
                         MAX_EPISODES=config.buffer_size, 
                         BATCH_SIZE=config.batch_size, 
                         use_target_network=config.use_target_network,
-                        eval=config.eval_mode,
+                        eval_mode=config.eval_mode,
                         stats=stats)
     elif config.agent_type == "dqn-rnd":
         agent = DqnAgentRND(env.action_space.n, 
@@ -323,7 +349,7 @@ if __name__ == "__main__":
                         MAX_EPISODES=config.buffer_size, 
                         BATCH_SIZE=config.batch_size, 
                         use_target_network=config.use_target_network,
-                        eval=config.eval_mode,
+                        eval_mode=config.eval_mode,
                         stats=stats,
                         rnd_alpha=config.rnd_alpha,
                         reward_factor=config.reward_factor,
@@ -335,11 +361,11 @@ if __name__ == "__main__":
                         epsilon=config.epsilon, 
                         MAX_STEPS=config.max_steps, 
                         MAX_EPISODES=config.buffer_size, 
-                        eval=config.eval_mode,
                         stats=stats,
                         lr=config.lr,
                         n_bins=config.n_bins,
                         k=config.k,
+                        eval_mode=config.eval_mode,
         )
     else:
         raise ValueError("Invalid agent type")
