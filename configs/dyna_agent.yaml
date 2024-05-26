@@ -1,5 +1,11 @@
 agent_type: dyna
-epsilon: max(0.1*np.exp(-iter/(total_episodes/50)), 0.01)
+epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
 lr: 0.2
 n_bins: (72,28)
 k: 64
+buffer_size: 500
+
+eval_mode: true
+eval_episodes: 100
+eval_path: 'plot_data/dyna_agent/dyna/model.npy'
+data_path: 'plot_data/dyna_agent/dyna'

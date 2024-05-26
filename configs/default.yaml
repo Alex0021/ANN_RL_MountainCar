@@ -31,5 +31,6 @@ k: 64
 eval_mode: false
 eval_last_agent: false
 eval_path: ./models/model.pth
+eval_episodes: 100_000
 
 plot_data: "plot_data/default"

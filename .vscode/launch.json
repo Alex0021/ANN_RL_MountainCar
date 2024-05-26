@@ -35,6 +35,15 @@
         },
 
         {
+            "name": "Run Dyna Agent",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            // config path should be asked to user
+            "args": "./configs/dyna_agent.yaml",
+        },
+
+        {
             "name": "Generate Plots",
             "type": "debugpy",
             "request": "launch",
