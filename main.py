@@ -124,12 +124,14 @@ def train_rnd_agent(env:gym.Env, agent:DqnAgentRND, config:RLConfig):
     stats = agent.stats
     # First pass: collect state data for mean and std calculation
     print("Collecting state data for RND normalization...")
+    rnd_reward = agent.rnd_reward
     for i in range(agent.RND_NORMALIZE_DELAY):
         done = False
         state, _ = env.reset()
         while not done:
             action = np.random.randint(0, agent.num_actions)
             next_state, tot_reward, terminated, truncated, infos = env.step(action)
+            rnd_reward.observe(state)
             done = terminated or truncated
             state = next_state
             total_steps += 1

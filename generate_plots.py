@@ -41,7 +41,7 @@ def plot_loss(df, ax=None):
     ax.set_ylabel("Loss")
 
     metric = df[df.metric == "training/loss"]
-    ax.scatter(metric.step, metric.value, label="Loss", s=1)
+    ax.scatter(metric.step[::10], metric.value[::10], label="Loss", s=1)
     value = smooth_data(metric.value, window_size=100)
     ax.plot(metric.step, value, label="Smoothed", color='orange')
 
@@ -205,22 +205,34 @@ def random_agent_plot():
     ax.plot(metric.step, metric.value, label="Episode length")
 
 # PLOT #2 (3.2)
-def dqn_no_heuristic_reward():
+def dqn_no_heuristic_reward_loss():
     data = get_data("dqn_agent")
-    df = data["no_heuristic"]["data"]
+    df = data["no_heuristic_no_target"]["data"]
 
-    fig = plt.figure(figsize=(12, 6))
-    ax = fig.add_subplot(121)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
     ax.set_xlabel("Training steps")
     ax.set_ylabel("Loss")
     ax.set_title("Loss")
 
     metric = df[df.metric == "training/loss"]
-    ax.scatter(metric.step, metric.value, label="Loss", s=1)
+    # filter outliers
     value = smooth_data(metric.value, window_size=100)
-    ax.plot(metric.step, value, label="Smoothed", color='orange')
+    step = metric.step
+    metric = metric[metric.value < 4_000]
+    
+    ax.scatter(metric.step[::10], metric.value[::10], label="Loss", s=1)
+    ax.plot(step, value, label="Smoothed", color='orange')
 
-    ax = fig.add_subplot(122)
+    # df = data["heuristic"]["data"]
+    # metric = df[df.metric == "episodes/episode_reward"]
+    # ax.scatter(metric.step, metric.value, label="Normed speed heuristic")
+
+def dqn_no_heuristic_reward_episode_reward():
+    data = get_data("dqn_agent")
+    df = data["no_heuristic_no_target"]["data"]
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Cumulative reward")
     ax.set_title("Cumulative reward per episode")
@@ -228,10 +240,6 @@ def dqn_no_heuristic_reward():
     metric = df[df.metric == "episodes/episode_reward"]
     ax.scatter(metric.step, metric.value, label="No heuristic", s=1)
     ax.plot(metric.step, smooth_data(metric.value, window_size=100), label="Smoothed", color='orange')
-
-    # df = data["heuristic"]["data"]
-    # metric = df[df.metric == "episodes/episode_reward"]
-    # ax.scatter(metric.step, metric.value, label="Normed speed heuristic")
 
 
 # PLOT #3 (3.3)
@@ -337,9 +345,9 @@ def dyna_loss():
 
     ax.set_ylim(-0.3, 0.3)
 
-    ax.scatter (loss.step, loss.value, s=1)
     value = smooth_data(loss.value, window_size=1000)
     ax.plot(loss.step, value, label="Smoothed", color='orange')
+    ax.scatter(loss.step[::10], loss.value[::10], s=1)
 
 def dyna_start_pos():
     data = get_data("dyna_agent", data_file="eval_data.csv")
@@ -382,29 +390,78 @@ def dyna_Q_values():
 
 # PLOT #16 (4.4)
 def dyna_key_episodes():
-    key_episode_index = [0, 62, 1670, 1877]
+    key_episode_index = [9, 99, 999, 2999]
+    models = [1000, 10_000, 100_000, 374_000]
+
+    config = RLConfig(yaml.load(open("./plot_data/dyna_agent/dyna/config.yaml"), Loader=yaml.FullLoader))
 
     data = np.load("./plot_data/dyna_agent/dyna/traces.npy", allow_pickle=True)
     fig = plt.figure(figsize=(10, 10))
-    
-    colors = plt.get_cmap('viridis')(np.linspace(0, 1, 200))
 
-    for i, episode in enumerate(key_episode_index):
+    # for Q values
+    # agent = DynaAgent(3,2)
+    # config = RLConfig(yaml.load(open("./plot_data/dyna_agent/dyna/config.yaml"), Loader=yaml.FullLoader))
+    # agent.load(f"./plot_data/dyna_agent/dyna/model.npy")
+    
+    # colors = plt.get_cmap('viridis')(np.linspace(0, 1, 200))
+
+    def split_data(data):
+        diff = np.diff(data, axis=0)
+        diff = np.abs(diff)
+        mean_diff = np.mean(diff, axis=0)
+        split = np.where(diff > mean_diff*10 ) 
+        return np.split(data, split[0]+1) 
+
+    for i in range(len(key_episode_index)):
+
+        episode = key_episode_index[i]
+        model = models[i]
+        Q_table = np.load(f"./models/DynaAgent_model_{model}.npy")
+        R_table = np.load(f"./models/DynaAgent_model_{model}_R_table.npy")
+
         ax = fig.add_subplot(len(key_episode_index)//2, len(key_episode_index)//2, i+1)
         ax.set_xlabel("Position")
         ax.set_ylabel("Velocity")
-        ax.set_title(f"Episode {episode+1}")
-        ax.set_xlim(-1.5, 1)
-        ax.set_ylim(-0.1, 0.1)
-        ax.set_xticks([-1.2, -0.6, 0, 0.6])
-        ax.set_yticks([-0.07, 0, 0.07])
+        
+        # ax.set_xlim(-1.5, 1)
+        # ax.set_ylim(-0.1, 0.1) 
+        # ax.set_xticks([-1.2, -0.6, 0, 0.6])
+        # ax.set_yticks([-0.07, 0, 0.07])
 
+        # Q values
+        max_Q = np.max(Q_table, axis=1)
+        R_table = np.sum(abs(R_table), axis=1)
+        max_Q = np.ma.masked_where(R_table == 0, max_Q)  # filter out zero R
+        new_Q_table = max_Q.reshape((config.n_bins[0]+1, config.n_bins[1]+1))
+        ax.imshow(new_Q_table, cmap='coolwarm', aspect='auto', extent=[-1.2, 0.6, -0.07, 0.07], origin='lower')
+        # ax.imshow(masked_Q_table, cmap='coolwarm', aspect='auto', origin='lower')
+        
+        # trajectory
         episode_data = data[episode]
-
         # filter out zeros
         episode_data = episode_data[~np.all(episode_data == 0, axis=1)]
         n = episode_data.shape[0]
-        ax.scatter(episode_data[:,0], episode_data[:,1], color=colors[:n])
+
+        ax.set_title(f"Episode {episode+1}, length: {n} steps")
+
+        # bins = np.linspace(-1.2, 0.6, config.n_bins[0]+1)
+        # episode_data[:, 0] = np.digitize(episode_data[:, 0], bins=bins) - 1
+        # bins = np.linspace(-0.07, 0.07, config.n_bins[1]+1)
+        # episode_data[:, 1] = np.digitize(episode_data[:, 1], bins=bins) - 1
+
+        # ax.scatter(episode_data[:,0], episode_data[:,1], color=colors[:n])
+        for split in split_data(episode_data):
+            ax.plot(split[:,0], split[:,1], c="black")
+
+        # vertical line at 0.5
+        ax.axvline(x=0.5, color='r', linestyle='--', linewidth=2)
+
+    plt.tight_layout(
+        rect=[0, 0.03, 1, 0.95]
+    )
+
+
+
 
 def dyna_trace_animation():
     data = np.load("./plot_data/dyna_agent/dyna/traces.npy", allow_pickle=True)
@@ -450,7 +507,7 @@ def dyna_Q_values_at_key_episodes():
 
         max_Q = np.max(Q_table, axis=1)
         new_Q_table = max_Q.reshape((config.n_bins[0]+1, config.n_bins[1]+1))
-        masked_Q_table = np.ma.masked_where(new_Q_table == 0, new_Q_table)
+        masked_Q_table = np.ma.masked_where(new_Q_table == -1, new_Q_table)
         # ax.imshow(new_Q_table, cmap='coolwarm', aspect='auto', extent=[-1.2, 0.6, -0.07, 0.07])
         ax.imshow(masked_Q_table, cmap='coolwarm', aspect='auto', extent=[-1.2, 0.6, -0.07, 0.07], origin='lower')
 
@@ -494,17 +551,16 @@ def comparison_env_rewards():
     ax.legend(loc="upper left")
 
 
-
 # PLOT #19 (4.5)
 def comparison_eval_performance():
     seeds = [np.random.randint(0, 100000) for _ in range(1000)]
 
     # load the models
     paths = [
-        # "dqn_agent/no_heuristic",
-        # "dqn_agent/heuristic",
-        # "dqn_agent/rnd",
-        # "dyna_agent/dyna",
+        "dqn_agent/no_heuristic",
+        "dqn_agent/heuristic",
+        "dqn_agent/rnd",
+        "dyna_agent/dyna",
     ]
 
     configs = [
@@ -559,8 +615,8 @@ def dqn_compare_heuristic_rewards():
     data = get_data("dqn_agent")
     data = [
         data["heuristic_speed"],
-        data["heuristic_speed_height"],
         data["heuristic_height"],
+        data["heuristic_speed_height"],
         data["heuristic_max_height"]
     ]
 
@@ -630,7 +686,8 @@ def generate_all_plots():
     configure_matplotlib()
     fs = [
         # random_agent_plot,
-        # dqn_no_heuristic_reward,
+        # dqn_no_heuristic_reward_episode_reward,
+        # dqn_no_heuristic_reward_loss,
         # dqn_heuristic_episode_length,
         # dqn_heuristic_cumulative_reward_per_episode,
         # dqn_heuristic_cumulative_reward_by_type,
@@ -647,13 +704,13 @@ def generate_all_plots():
         # dyna_start_pos,
         # dyna_loss,
         # dyna_Q_values,
-        # dyna_key_episodes,
+        dyna_key_episodes,
         # dyna_Q_values_at_key_episodes,
         # comparison_env_rewards,
         # comparison_eval_performance,
 
         # extra
-        dqn_compare_heuristic_rewards,
+        # dqn_compare_heuristic_rewards,
         # target_network_effect_heuristic,
         # target_network_effect_no_heuristic
     ]
