@@ -158,9 +158,9 @@ def plot_episode_length(df, window_size=100):
 
     ax.plot(metric.step, smooth_data(metric.value, window_size=100), label="Smoothed", color='orange')
 
-def plot_cumulative_reward(df, episode_limit=500):
-    fig = plt.figure(figsize=(12, 6))
-    ax = fig.add_subplot(121)
+def plot_cumulative_reward_per_episode(df):
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Cumulative reward")
     ax.set_title("Cumulative reward per episode")
@@ -169,16 +169,18 @@ def plot_cumulative_reward(df, episode_limit=500):
     ax.scatter(metric.step, metric.value, label="No heuristic", s=1)
     ax.plot(metric.step, smooth_data(metric.value, window_size=100), label="Smoothed", color='orange')
 
+def plot_cumulative_reward_by_type(df, episode_limit=500):
     df = df[df.step <= episode_limit]
 
     env_reward = df[df.metric == "episodes/episode_env_reward"]
     aux_reward = df[df.metric == "episodes/episode_aux_reward"]
     tot_reward = df[df.metric == "episodes/episode_reward"]
 
-    ax = fig.add_subplot(122)
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Reward")
-    ax.set_title("Cumulative reward")
+    ax.set_title("Cumulative reward by type")
 
     ax.plot(env_reward.step, np.cumsum(env_reward.value), label="Environment")
     ax.plot(aux_reward.step, np.cumsum(aux_reward.value), label="Heuristic")
@@ -240,11 +242,17 @@ def dqn_heuristic_episode_length():
     plot_episode_length(df)
 
 # PLOT #4 (3.3)
-def dqn_heuristic_cumulative_reward():
+def dqn_heuristic_cumulative_reward_per_episode():
     data = get_data("dqn_agent")
     df = data["heuristic"]["data"]
     
-    plot_cumulative_reward(df, episode_limit=500)
+    plot_cumulative_reward_per_episode(df)
+
+def dqn_heuristic_cumulative_reward_by_type():
+    data = get_data("dqn_agent")
+    df = data["heuristic"]["data"]
+    
+    plot_cumulative_reward_by_type(df, episode_limit=500)
 
 # PLOT #5 (3.3)
 def dqn_heuristic_cumulative_success():
@@ -268,11 +276,17 @@ def dqn_rnd_episode_length():
     plot_episode_length(df)
 
 # PLOT #8 (3.4)
-def dqn_rnd_cumulative_reward():
+def dqn_rnd_cumulative_reward_per_episode():
     data = get_data("dqn_agent")
     df = data["rnd"]["data"]
     
-    plot_cumulative_reward(df)
+    plot_cumulative_reward_per_episode(df)
+
+def dqn_rnd_cumulative_reward_by_type():
+    data = get_data("dqn_agent")
+    df = data["rnd"]["data"]
+    
+    plot_cumulative_reward_by_type(df)
 
 # PLOT #9 (3.4)
 def dqn_rnd_cumulative_success():
@@ -296,11 +310,11 @@ def dyna_episode_length():
     plot_episode_length(df)
 
 # PLOT #12 (4.4)
-def dyna_cumulative_reward():
+def dyna_cumulative_reward_per_episode():
     data = get_data("dyna_agent")
     df = data["dyna"]["data"]
     
-    plot_cumulative_reward(df)
+    plot_cumulative_reward_per_episode(df)
 
 # PLOT #13 (4.4)
 def dyna_cumulative_success():
@@ -489,7 +503,7 @@ def comparison_eval_performance():
     paths = [
         # "dqn_agent/no_heuristic",
         # "dqn_agent/heuristic",
-        "dqn_agent/rnd",
+        # "dqn_agent/rnd",
         # "dyna_agent/dyna",
     ]
 
@@ -519,7 +533,7 @@ def comparison_eval_performance():
         results.append(pd.read_csv("./plot_data/"+path+"/eval_data.csv"))
 
     # plot the results
-    fig = plt.figure()
+    fig = plt.figure(figsize=(12, 6))
     fig.suptitle("Evaluation performance")
     ax = fig.add_subplot(111)
     ax.set_xlabel("Episode")
@@ -550,7 +564,7 @@ def dqn_compare_heuristic_rewards():
         data["heuristic_max_height"]
     ]
 
-    fig = plt.figure()
+    fig = plt.figure(figsize=(12, 6))
     ax = fig.add_subplot(111)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Episode length")
@@ -565,41 +579,46 @@ def dqn_compare_heuristic_rewards():
     ax.legend()
 
 
-def target_network_effect():
+def target_network_effect_no_heuristic():
     data = get_data("dqn_agent")
-    
+
     no_heuristic = [
         data["no_heuristic_no_target"],
         data["no_heuristic_target"],
     ]
 
-    heuristic = [
-        data["heuristic_no_target"],
-        data["heuristic"],
-    ]
-
-    fig = plt.figure(figsize=(15, 6))
-    fig.suptitle("Effect of target network on DQN performance")
-    
+    fig = plt.figure()
+    # fig.suptitle("Effect of target network on DQN performance")
 
     labels = ["No target", "Target"]
 
-    ax = fig.add_subplot(122)
+    ax = fig.add_subplot(111)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Episode length")
     ax.set_title("With heuristic reward")
-    for d, l in zip(heuristic, labels):
+    for d, l in zip(no_heuristic, labels):
         metric = d["data"][d["data"].metric == "episodes/episode_length"]
         value = smooth_data(metric.value, window_size=100)
         ax.plot(metric.step, value, label=l)
 
     ax.legend(loc='upper right')
+    
+def target_network_effect_heuristic():
+    data = get_data("dqn_agent")
+    
+    heuristic = [
+        data["heuristic_no_target"],
+        data["heuristic"],
+    ]
 
-    ax = fig.add_subplot(121)
+    labels = ["No target", "Target"]
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
     ax.set_xlabel("Episode")
     ax.set_ylabel("Episode length")
     ax.set_title("Without heuristic reward")
-    for d, l in zip(no_heuristic, labels):
+    for d, l in zip(heuristic, labels):
         metric = d["data"][d["data"].metric == "episodes/episode_length"]
         value = smooth_data(metric.value, window_size=100)
         ax.plot(metric.step, value, label=l)
@@ -611,20 +630,22 @@ def generate_all_plots():
     configure_matplotlib()
     fs = [
         # random_agent_plot,
-        dqn_no_heuristic_reward,
+        # dqn_no_heuristic_reward,
         # dqn_heuristic_episode_length,
-        # dqn_heuristic_cumulative_reward,
+        # dqn_heuristic_cumulative_reward_per_episode,
+        # dqn_heuristic_cumulative_reward_by_type,
         # dqn_heuristic_cumulative_success,
-        dqn_heuristic_loss,
+        # dqn_heuristic_loss,
         # dqn_rnd_episode_length,
-        # dqn_rnd_cumulative_reward,
+        # dqn_rnd_cumulative_reward_by_type,
+        # dqn_rnd_cumulative_reward_per_episode,
         # dqn_rnd_cumulative_success,
-        dqn_rnd_loss,
+        # dqn_rnd_loss,
         # dyna_episode_length,
-        # dyna_cumulative_reward,
+        # dyna_cumulative_reward_per_episode,
         # dyna_cumulative_success,
         # dyna_start_pos,
-        dyna_loss,
+        # dyna_loss,
         # dyna_Q_values,
         # dyna_key_episodes,
         # dyna_Q_values_at_key_episodes,
@@ -632,8 +653,9 @@ def generate_all_plots():
         # comparison_eval_performance,
 
         # extra
-        # dqn_compare_heuristic_rewards,
-        # target_network_effect
+        dqn_compare_heuristic_rewards,
+        # target_network_effect_heuristic,
+        # target_network_effect_no_heuristic
     ]
 
     for f in fs:
