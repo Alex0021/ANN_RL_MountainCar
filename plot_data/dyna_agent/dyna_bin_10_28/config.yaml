@@ -3,7 +3,7 @@ agent_type: dyna
 alpha: 1e-3
 batch_size: 64
 buffer_size: 500
-data_path: plot_data/dyna_agent/dyna_low_bins
+data_path: plot_data/dyna_agent/dyna_bin_10_28
 env: gyms:gyms/CustomMountainCar-v0
 epsilon: max(0.1*np.exp(-iter/(num_episodes/50)), 0.01)
 eval_episodes: 100000
@@ -16,7 +16,7 @@ k: 64
 log_dir: ./logs/train
 lr: 0.2
 max_steps: 200
-n_bins: (10,2)
+n_bins: (10, 28)
 num_episodes: 3000
 observation_space: 2
 plot_data: plot_data/default

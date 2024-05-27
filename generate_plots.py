@@ -634,6 +634,79 @@ def dqn_compare_heuristic_rewards():
     
     ax.legend()
 
+def dyna_compare_bin_sizes_speed():
+    data = get_data("dyna_agent")
+    data = [
+        data["dyna_bin_72_2"],
+        data["dyna_bin_72_10"],
+        data["dyna"],
+        data["dyna_bin_72_50"],
+        data["dyna_bin_72_200"]
+    ]
+
+    fig = plt.figure(figsize=(6, 6))
+    fig.suptitle("Effect of bin size for velocity on Dyna-Q performance")
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Episode length")
+
+    labels = ["(72,2)", "(72,10)", "(72,28)", "(72,50)", "(72,200)"]
+
+    for d, l in zip(data, labels):
+        metric = d["data"][d["data"].metric == "episodes/episode_length"]
+        value = smooth_data(metric.value, window_size=100)
+        ax.plot(metric.step, value, label=l)
+
+    ax.legend(loc='best')
+
+def dyna_compare_bin_sizes_pos():
+    data = get_data("dyna_agent")
+    data = [
+        data["dyna_bin_3_28"],
+        data["dyna_bin_10_28"],
+        data["dyna"],
+        data["dyna_bin_150_28"],
+        data["dyna_bin_500_28"]
+    ]
+
+    fig = plt.figure(figsize=(6, 6))
+    fig.suptitle("Effect of bin size for position on Dyna-Q performance")
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Episode length")
+
+    labels = ["(3,28)", "(10,28)", "(72,28)", "(150,28)", "(500,28)"]
+
+    for d, l in zip(data, labels):
+        metric = d["data"][d["data"].metric == "episodes/episode_length"]
+        value = smooth_data(metric.value, window_size=100)
+        ax.plot(metric.step, value, label=l)
+
+    ax.legend(loc='best')
+
+def dyna_compare_k_values():
+    data = get_data("dyna_agent")
+    data = [
+        data["dyna_k_low"],
+        data["dyna"],
+        data["dyna_k_high"]
+    ]
+
+    fig = plt.figure(figsize=(6, 6))
+    fig.suptitle("Effect of $k$ on Dyna-Q performance")
+    ax = fig.add_subplot(111)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Episode length")
+
+    labels = ["16", "64", "128"]
+
+    for d, l in zip(data, labels):
+        metric = d["data"][d["data"].metric == "episodes/episode_length"]
+        value = smooth_data(metric.value, window_size=100)
+        ax.plot(metric.step, value, label=l)
+
+    ax.legend(loc='best')
+
 
 def target_network_effect_no_heuristic():
     data = get_data("dqn_agent")
@@ -713,6 +786,9 @@ def generate_all_plots():
         # dqn_compare_heuristic_rewards,
         # target_network_effect_heuristic,
         # target_network_effect_no_heuristic
+        dyna_compare_bin_sizes_speed,
+        dyna_compare_bin_sizes_pos,
+        dyna_compare_k_values
     ]
 
     for f in fs:
@@ -747,7 +823,11 @@ if __name__ == "__main__":
     # comparison_eval_performance()
     # dqn_compare_heuristic_rewards()
     # target_network_effect()
+    # dyna_compare_bin_sizes_speed()
+    # dyna_compare_bin_sizes_pos()
+    # dyna_compare_k_values()
 
+    
     generate_all_plots()
 
     plt.show()
