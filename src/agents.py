@@ -463,12 +463,8 @@ class DynaAgent():
         self.num_actions = num_actions
         self.dim = obs_dim + 2 # state + action
         self.obs_dim = obs_dim
-        self.dim = obs_dim + 2 # state + action
-        self.obs_dim = obs_dim
         self.discount = discount
         self.epsilon = epsilon
-        self.lr = lr
-        self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
         self.lr = lr
         self.replay_buffer = ReplayBuffer(self.dim, MAX_STEPS, MAX_EPISODES)
         self.k = k
@@ -476,45 +472,14 @@ class DynaAgent():
         self.model_folder = model_folder
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.action_ranges = np.diff(np.array(action_ranges), axis=1).flatten()
-        self.action_ranges = np.diff(np.array(action_ranges), axis=1).flatten()
         self.actions_min = np.array(action_ranges)[:,0]
         self.n_bins = np.array(n_bins)
         self.bin_sizes = np.divide(self.action_ranges, self.n_bins+1)
         n_states = np.prod(self.n_bins+1)
         self.update_counter = 0
         self.export_frequency = export_frequency
-        self.bin_sizes = np.divide(self.action_ranges, self.n_bins+1)
-        n_states = np.prod(self.n_bins+1)
-        self.update_counter = 0
-        self.export_frequency = export_frequency
         self.eval_mode = eval_mode
         
-        self.Q_table = np.zeros((n_states, num_actions))
-        self.R_table = np.zeros((n_states, num_actions))
-        self.P_table = np.zeros((n_states, num_actions, n_states))
-        self.bin_count_table = np.zeros((n_states, num_actions))
-
-        # Stats
-        self.Q_avg = 0
-        self.Q_head_right_avg = 0
-        self.Q_head_stay_avg = 0
-        self.Q_head_left_avg = 0
-
-        # Check for epsilon function
-        if eval_mode:
-            epsilon = 0
-        if not isinstance(epsilon, types.FunctionType):
-            self.get_epsilon_value = lambda _: epsilon
-        else:
-            self.get_epsilon_value = epsilon
-
-        # clear models folder
-        if not eval_mode:
-            if os.path.exists(model_folder):
-                print("Clearing models folder...")
-                self.clear_models(model_name=self.__class__.__name__)
-            else:
-                os.makedirs(model_folder)
         self.Q_table = np.zeros((n_states, num_actions))
         self.R_table = np.zeros((n_states, num_actions))
         self.P_table = np.zeros((n_states, num_actions, n_states))

@@ -689,7 +689,8 @@ def dyna_compare_k_values():
     data = [
         data["dyna_k_low"],
         data["dyna"],
-        data["dyna_k_high"]
+        data["dyna_k_high"],
+        data["dyna_k_1024"]
     ]
 
     fig = plt.figure(figsize=(6, 6))
@@ -698,7 +699,7 @@ def dyna_compare_k_values():
     ax.set_xlabel("Episode")
     ax.set_ylabel("Episode length")
 
-    labels = ["16", "64", "128"]
+    labels = ["16", "64", "128", "1024"]
 
     for d, l in zip(data, labels):
         metric = d["data"][d["data"].metric == "episodes/episode_length"]
@@ -777,7 +778,7 @@ def generate_all_plots():
         # dyna_start_pos,
         # dyna_loss,
         # dyna_Q_values,
-        dyna_key_episodes,
+        # dyna_key_episodes,
         # dyna_Q_values_at_key_episodes,
         # comparison_env_rewards,
         # comparison_eval_performance,
@@ -786,8 +787,8 @@ def generate_all_plots():
         # dqn_compare_heuristic_rewards,
         # target_network_effect_heuristic,
         # target_network_effect_no_heuristic
-        dyna_compare_bin_sizes_speed,
-        dyna_compare_bin_sizes_pos,
+        # dyna_compare_bin_sizes_speed,
+        # dyna_compare_bin_sizes_pos,
         dyna_compare_k_values
     ]
 
